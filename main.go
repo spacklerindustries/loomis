@@ -64,6 +64,7 @@ func main() {
   /* gather what we know already from the records and check they exist on the system */
   dir := "/sys/devices" //all usb devices will be in here somewhere, lets find them
   for _, v := range allRecords {
+    found := false
     err2 := filepath.Walk(dir, func(path string, info os.FileInfo, err2 error) error {
       if err2 != nil {
         fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", dir, err2)
@@ -73,12 +74,26 @@ func main() {
         devid := strings.Split(v.DeviceId, "/")
         if strings.Contains(info.Name(), devid[1]) {
           log.Printf("%v %v", v.UdevId, v.DeviceId)
+          found = true
           return nil
           /* our file matches the server */
         }
       }
       return nil
     })
+    log.Printf("%v", found)
+    /* if we don't find a match at all, then remove it from the records
+      we can check for running services using this device and kill them here too
+    */
+    if found == false {
+      allRecords = remove(allRecords, Record{UdevId: v.UdevId, DeviceId: v.DeviceId})
+    }
+    result, err := json.Marshal(allRecords)
+    if err != nil {
+      log.Println(err)
+    }
+    log.Printf("Result: %v", string(result))
+    err = ioutil.WriteFile(stateFile, result, 0644)
     if err2 != nil {
 		  fmt.Printf("error walking the path %q: %v\n", dir, err2)
 	  }
