@@ -11,11 +11,14 @@ import (
 	"os/signal"
 	"syscall"
   "net/http"
+  "net"
   "path/filepath"
+  "os/exec"
+  "strconv"
 
   "github.com/pilebones/go-udev/netlink"
   "github.com/gorilla/mux"
-  "github.com/phayes/freeport"
+  //"github.com/phayes/freeport"
   //"github.com/google/uuid"
 )
 
@@ -41,13 +44,29 @@ func init() {
 	filePath = flag.String("file", "", "Optionnal input file path with matcher-rules (default: no matcher)")
 }
 
+func checkPort(portlow string, porthigh string) string {
+  porta, _ := strconv.Atoi(porthigh)
+  portb, _ := strconv.Atoi(portlow)
+  port := ""
+  fmt.Printf("-- %v %v\n",porta,portb)
+  for i := porta; i <= portb; i++ {
+    fmt.Printf("-- %v\n",i)
+    port = strconv.Itoa(i)
+    ln, err := net.Listen("tcp", ":" + port)
+    if err != nil {
+      fmt.Printf("Can't listen on port %q: %s\n", port, err)
+      continue
+    } else {
+      _ = ln.Close()
+      fmt.Printf("TCP Port %q is available\n", port)
+      return port
+    }
+  }
+  return ""
+}
+
 func main() {
 	flag.Parse()
-  port, err := freeport.GetFreePort()
-  if err != nil {
-    log.Fatal(err)
-  }
-  log.Printf("free port: %v", port)
   stateFile = os.Getenv("STATE_FILE")
   if stateFile == "" {
     stateFile = "output.json"
@@ -145,13 +164,29 @@ func monitor(matcher netlink.Matcher) {
       if (uevent.Env["SUBSYSTEM"] == "tty") {
         v := strings.Split(uevent.Env["DEVPATH"], "/")
         if (uevent.Env["ACTION"] == "add") {
+          // v[8] ? may not always be v[8]
           allRecords = append(allRecords, Record{UdevId: v[8], DeviceId: "/dev/"+uevent.Env["DEVNAME"]})
           //s = append(s, string(input))
           log.Printf("%v %v", v[8], uevent.Env["DEVNAME"])
+          port := checkPort("4300","4201")
+          log.Println(port)
+          cmd := exec.Command("/usr/bin/shellinaboxd","-t","-s","/:ben:ben:/:screen -D -R -S "+v[8]+" /dev/"+uevent.Env["DEVNAME"]+" 9600 -o","-p",port,"--background=/tmp/"+v[8]+".pid")
+          err2 := cmd.Start()
+          cmd.Wait()
+          if err2 != nil {
+            log.Println(err2)
+          }
         } else {
           //s = remove(s, string(input))
           allRecords = remove(allRecords, Record{UdevId: v[8], DeviceId: "/dev/"+uevent.Env["DEVNAME"]})
           log.Printf("%v %v", v[8], uevent.Env["DEVNAME"])
+          pidnum, _ := exec.Command("cat", "/tmp/"+v[8]+".pid").CombinedOutput()
+          cmd := exec.Command("kill",string(pidnum))
+          err2 := cmd.Start()
+          cmd.Wait()
+          if err2 != nil {
+            log.Println(err2)
+          }
         }
         result, err := json.Marshal(allRecords)
         if err != nil {
