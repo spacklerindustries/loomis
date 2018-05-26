@@ -18,7 +18,7 @@ COPY main /app/loomis/bin/.
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx-template.conf.tpl /app/loomis/nginx-template.conf.tpl
 COPY entrypoint.sh /app/loomis/bin/.
-RUN chmod +x /app/loomis/bin/run.sh
+RUN chmod +x /app/loomis/bin/entrypoint.sh
 
 VOLUME /app/loomis/config/
 

@@ -16,11 +16,10 @@ import (
   "os/exec"
   "strconv"
   "html/template"
-  //"time"
+  "errors"
 
   "github.com/pilebones/go-udev/netlink"
   "github.com/gorilla/mux"
-  //"github.com/phayes/freeport"
   "github.com/google/uuid"
 )
 
@@ -61,7 +60,7 @@ func main() {
   }
   result, err := ioutil.ReadFile(stateFile) // just pass the file name
   if err != nil {
-      fmt.Print(err)
+      log.Print(err)
   }
   consoles = result
   if err := json.Unmarshal([]byte(consoles), &allRecords); err != nil {
@@ -73,7 +72,7 @@ func main() {
     found := false
     err2 := filepath.Walk(dir, func(path string, info os.FileInfo, err2 error) error {
       if err2 != nil {
-        fmt.Printf("prevent panic by handling failure accessing a path %q: %v\n", dir, err2)
+        log.Printf("prevent panic by handling failure accessing a path %q: %v\n", dir, err2)
         return err2
       }
       if strings.Contains(path, v.UdevId) {
@@ -101,7 +100,7 @@ func main() {
     log.Printf("Result: %v", string(result))
     err = ioutil.WriteFile(stateFile, result, 0644)
     if err2 != nil {
-		  fmt.Printf("error walking the path %q: %v\n", dir, err2)
+		  log.Printf("error walking the path %q: %v\n", dir, err2)
 	  }
   }
 
@@ -153,62 +152,37 @@ func monitor(matcher netlink.Matcher) {
         if (uevent.Env["ACTION"] == "add") {
           // v[8] ? may not always be v[8]
           allRecords = append(allRecords, Record{UdevId: v[8], DeviceId: "/dev/"+uevent.Env["DEVNAME"]})
-          //s = append(s, string(input))
           log.Printf("%v %v", v[8], uevent.Env["DEVNAME"])
-          shellport := checkPort("4300","4201")
-          log.Println(shellport)
-          nginxport := checkPort("8300","8201")
-          log.Println(nginxport)
-          //time.Sleep(5000 * time.Millisecond)
-          /* start shellinabox localhost */
-          shellcmd := exec.Command("/usr/bin/shellinaboxd","-t","-s","/:nobody:nogroup:/:screen -D -R -S "+v[8]+" /dev/"+uevent.Env["DEVNAME"]+" 9600 -o","-p",shellport,"--background=/app/loomis/run/"+v[8]+".pid","--localhost-only")
-          shellerr := shellcmd.Start()
-          shellcmd.Wait()
-          if shellerr != nil {
-            log.Println(shellerr)
+          shellport, shellporterr := checkPort("4300","4201")
+          if shellporterr != nil {
+            log.Println(shellporterr)
           }
-          /* start shellinabox */
-          /* create nginx template */
-          createNginxConf(v[8], nginxport, shellport)
-          /* create nginx template */
-          /* reload nginx */
-          nginxcmd := exec.Command("service","nginx","reload")
-          nginxerr := nginxcmd.Start()
-          nginxcmd.Wait()
-          if nginxerr != nil {
-            log.Println(nginxerr)
+          //log.Println(shellport)
+          nginxport, nginxporterr := checkPort("8300","8201")
+          //log.Println(nginxport)
+          if nginxporterr != nil {
+            log.Println(nginxporterr)
           }
-          /* reload nginx */
+          if nginxporterr == nil && shellporterr == nil {
+            /* no errors, do the thing */
+            starterr := startShellinabox(v[8], uevent.Env["DEVNAME"], shellport)
+            if starterr == nil {
+              nginxconferr := createNginxConf(v[8], nginxport, shellport)
+              if nginxconferr == nil {
+                _ = reloadNginx()
+              }
+            }
+          }
         } else {
           allRecords = remove(allRecords, Record{UdevId: v[8], DeviceId: "/dev/"+uevent.Env["DEVNAME"]})
           log.Printf("%v %v", v[8], uevent.Env["DEVNAME"])
-          /* kill shellinabox */
-          pidnum, _ := exec.Command("cat", "/app/loomis/run/"+v[8]+".pid").CombinedOutput()
-          pidcmd := exec.Command("kill","-9",string(pidnum))
-          piderr := pidcmd.Start()
-          pidcmd.Wait()
-          if piderr != nil {
-            log.Println(piderr)
+          stoperr := stopShellinabox(v[8])
+          if stoperr == nil {
+            removeconferr := removeNginxConfig(v[8])
+            if removeconferr == nil {
+              _ = reloadNginx()
+            }
           }
-          piderr = os.Remove("/app/loomis/run/"+v[8]+".pid")
-          if piderr != nil {
-            fmt.Println(piderr.Error())
-          }
-          /* kill shellinabox */
-          /* remove nginx config */
-          conferr := os.Remove("/app/loomis/config/"+v[8]+".conf")
-          if conferr != nil {
-            fmt.Println(conferr.Error())
-          }
-          /* remove nginx config */
-          /* reload nginx */
-          nginxcmd := exec.Command("service","nginx","reload")
-          nginxerr := nginxcmd.Start()
-          nginxcmd.Wait()
-          if nginxerr != nil {
-            log.Println(nginxerr)
-          }
-          /* reload nginx */
         }
         result, err := json.Marshal(allRecords)
         if err != nil {
@@ -224,7 +198,52 @@ func monitor(matcher netlink.Matcher) {
 	}
 }
 
-func createNginxConf(udev string, nginx_port string, shell_port string) {
+func startShellinabox(udev string, devname string, shellport string) error {
+  /* start shellinabox localhost */
+  shellcmd := exec.Command("/usr/bin/shellinaboxd","-t","-s","/:nobody:nogroup:/:screen -D -R -S "+udev+" /dev/"+devname+" 9600 -o","-p",shellport,"--background=/app/loomis/run/"+udev+".pid","--localhost-only")
+  shellerr := shellcmd.Start()
+  shellcmd.Wait()
+  if shellerr != nil {
+    log.Println(shellerr)
+    return shellerr
+  }
+  return nil
+  /* start shellinabox */
+}
+
+func stopShellinabox(udev string) error {
+  /* kill shellinabox */
+  pidnum, _ := exec.Command("cat", "/app/loomis/run/"+udev+".pid").CombinedOutput()
+  pidcmd := exec.Command("kill","-9",string(pidnum))
+  piderr := pidcmd.Start()
+  pidcmd.Wait()
+  if piderr != nil {
+    log.Println(piderr)
+    return piderr
+  }
+  piderr = os.Remove("/app/loomis/run/"+udev+".pid")
+  if piderr != nil {
+    log.Println(piderr.Error())
+    return piderr
+  }
+  return nil
+  /* kill shellinabox */
+}
+
+func reloadNginx() error {
+  /* reload nginx */
+  nginxcmd := exec.Command("service","nginx","reload")
+  nginxerr := nginxcmd.Start()
+  nginxcmd.Wait()
+  if nginxerr != nil {
+    log.Println(nginxerr)
+    return nginxerr
+  }
+  return nil
+  /* reload nginx */
+}
+
+func createNginxConf(udev string, nginx_port string, shell_port string) error {
   /* create nginx template */
   nginx_uuid := uuid.New().String()
   c := templatevars{
@@ -235,41 +254,52 @@ func createNginxConf(udev string, nginx_port string, shell_port string) {
   t, err := template.ParseFiles("/app/loomis/nginx-template.conf.tpl")
   if err != nil {
     log.Print(err)
-    return
+    return err
   }
   f, err := os.Create("/app/loomis/config/"+udev+".conf")
   if err != nil {
     log.Println("create file: ", err)
-    return
+    return err
   }
   err = t.Execute(f, c)
   if err != nil {
     log.Print("execute: ", err)
-    return
+    return err
   }
   f.Close()
+  return nil
   /* create nginx template */
 }
 
-func checkPort(portlow string, porthigh string) string {
-  porta, _ := strconv.Atoi(porthigh)
-  portb, _ := strconv.Atoi(portlow)
+func removeNginxConfig(udev string) error {
+  /* remove nginx config */
+  conferr := os.Remove("/app/loomis/config/"+udev+".conf")
+  if conferr != nil {
+    log.Println(conferr.Error())
+    return conferr
+  }
+  return nil
+  /* remove nginx config */
+}
+
+func checkPort(porthigh string, portlow string) (string, error) {
+  /* check port in range is unused */
+  porta, _ := strconv.Atoi(portlow)
+  portb, _ := strconv.Atoi(porthigh)
   port := ""
-  fmt.Printf("-- %v %v\n",porta,portb)
   for i := porta; i <= portb; i++ {
-    fmt.Printf("-- %v\n",i)
     port = strconv.Itoa(i)
     ln, err := net.Listen("tcp", ":" + port)
     if err != nil {
-      fmt.Printf("Can't listen on port %q: %s\n", port, err)
+      log.Printf("Can't listen on port %q: %s\n", port, err)
       continue
     } else {
       _ = ln.Close()
-      fmt.Printf("TCP Port %q is available\n", port)
-      return port
+      log.Printf("TCP Port %q is available\n", port)
+      return port, nil
     }
   }
-  return ""
+  return "", errors.New("Unable to allocate port")
 }
 
 func getOptionnalMatcher() (matcher netlink.Matcher, err error) {
