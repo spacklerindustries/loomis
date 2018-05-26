@@ -37,6 +37,8 @@ type Exception struct {
 type Record struct {
     UdevId   string `json:"udev"`
     DeviceId string `json:"device"`
+    ShellPort string `json:"port"`
+    NginxUuid string `json:"uuid"`
 }
 
 type templatevars struct {
@@ -55,7 +57,7 @@ func main() {
 	flag.Parse()
   stateFile = os.Getenv("STATE_FILE")
   if stateFile == "" {
-    stateFile = "output.json"
+    stateFile = "/app/loomis/config/output.json"
     //log.Fatalln("STATE_FILE env var not set")
   }
   result, err := ioutil.ReadFile(stateFile) // just pass the file name
@@ -68,40 +70,49 @@ func main() {
   }
   /* gather what we know already from the records and check they exist on the system */
   dir := "/sys/devices" //all usb devices will be in here somewhere, lets find them
-  for _, v := range allRecords {
+  for i := len(allRecords) - 1; i >= 0; i-- {
     found := false
     err2 := filepath.Walk(dir, func(path string, info os.FileInfo, err2 error) error {
       if err2 != nil {
         log.Printf("prevent panic by handling failure accessing a path %q: %v\n", dir, err2)
         return err2
       }
-      if strings.Contains(path, v.UdevId) {
-        devid := strings.Split(v.DeviceId, "/")
-        if strings.Contains(info.Name(), devid[1]) {
-          log.Printf("%v %v", v.UdevId, v.DeviceId)
-          found = true
-          return nil
-          /* our file matches the server */
+      if found != true {
+        if strings.Contains(path, allRecords[i].UdevId) {
+          if strings.Contains(info.Name(), allRecords[i].DeviceId) {
+            log.Printf("Device exists and is active; udev:%v,  devname: %v", allRecords[i].UdevId, allRecords[i].DeviceId)
+            found = true
+            return nil
+            /* it exists */
+          }
         }
       }
       return nil
     })
-    log.Printf("%v", found)
     /* if we don't find a match at all, then remove it from the records
       we can check for running services using this device and kill them here too
     */
     if found == false {
-      allRecords = remove(allRecords, Record{UdevId: v.UdevId, DeviceId: v.DeviceId})
+      allRecords = append(allRecords[:i], allRecords[i+1:]...)
+    } else {
+      starterr := startShellinabox(allRecords[i].UdevId, allRecords[i].DeviceId, allRecords[i].ShellPort)
+      if starterr != nil {
+        log.Println(starterr)
+      }
     }
-    result, err := json.Marshal(allRecords)
-    if err != nil {
-      log.Println(err)
-    }
-    log.Printf("Result: %v", string(result))
-    err = ioutil.WriteFile(stateFile, result, 0644)
     if err2 != nil {
 		  log.Printf("error walking the path %q: %v\n", dir, err2)
 	  }
+  }
+  result, jsonerr := json.Marshal(allRecords)
+  if jsonerr != nil {
+    log.Println(jsonerr)
+  }
+  //log.Printf("Result: %v", string(result))
+  err = ioutil.WriteFile(stateFile, result, 0644)
+  nginxconferr := createNginxConf(allRecords)
+  if nginxconferr == nil {
+    _ = reloadNginx()
   }
 
   /*
@@ -150,35 +161,47 @@ func monitor(matcher netlink.Matcher) {
       if (uevent.Env["SUBSYSTEM"] == "tty") {
         v := strings.Split(uevent.Env["DEVPATH"], "/")
         if (uevent.Env["ACTION"] == "add") {
-          // v[8] ? may not always be v[8]
-          allRecords = append(allRecords, Record{UdevId: v[8], DeviceId: "/dev/"+uevent.Env["DEVNAME"]})
-          log.Printf("%v %v", v[8], uevent.Env["DEVNAME"])
           shellport, shellporterr := checkPort("4300","4201")
           if shellporterr != nil {
             log.Println(shellporterr)
           }
           //log.Println(shellport)
-          nginxport, nginxporterr := checkPort("8300","8201")
+          /*nginxport, nginxporterr := checkPort("8300","8201")
           //log.Println(nginxport)
           if nginxporterr != nil {
             log.Println(nginxporterr)
-          }
-          if nginxporterr == nil && shellporterr == nil {
+          }*/
+          nginx_uuid := uuid.New().String()
+          // v[8] ? may not always be v[8]
+          allRecords = append(allRecords, Record{UdevId: v[len(v)-4], DeviceId: uevent.Env["DEVNAME"], ShellPort: shellport, NginxUuid: nginx_uuid})
+          log.Printf("Inserted device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
+          //if nginxporterr == nil && shellporterr == nil {
+          if shellporterr == nil {
             /* no errors, do the thing */
-            starterr := startShellinabox(v[8], uevent.Env["DEVNAME"], shellport)
+            starterr := startShellinabox(v[len(v)-4], uevent.Env["DEVNAME"], shellport)
             if starterr == nil {
-              nginxconferr := createNginxConf(v[8], nginxport, shellport)
+              //nginxconferr := createNginxConf(v[len(v)-4], nginxport, shellport, nginx_uuid)
+              nginxconferr := createNginxConf(allRecords)
               if nginxconferr == nil {
                 _ = reloadNginx()
               }
             }
           }
         } else {
-          allRecords = remove(allRecords, Record{UdevId: v[8], DeviceId: "/dev/"+uevent.Env["DEVNAME"]})
-          log.Printf("%v %v", v[8], uevent.Env["DEVNAME"])
-          stoperr := stopShellinabox(v[8])
+          var modAllRecords []Record
+          modAllRecords = allRecords
+          for i := range allRecords {
+            if allRecords[i].UdevId == v[len(v)-4] && allRecords[i].DeviceId == uevent.Env["DEVNAME"] {
+              log.Printf("Removed device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
+              modAllRecords = remove(allRecords, Record{UdevId: v[len(v)-4], DeviceId: uevent.Env["DEVNAME"], ShellPort: allRecords[i].ShellPort, NginxUuid: allRecords[i].NginxUuid})
+            }
+          }
+          allRecords = modAllRecords
+          //log.Printf("%v %v", v[len(v)-4], uevent.Env["DEVNAME"])
+          stoperr := stopShellinabox(v[len(v)-4])
           if stoperr == nil {
-            removeconferr := removeNginxConfig(v[8])
+            //removeconferr := removeNginxConfig(v[len(v)-4])
+            removeconferr := createNginxConf(allRecords)
             if removeconferr == nil {
               _ = reloadNginx()
             }
@@ -188,7 +211,7 @@ func monitor(matcher netlink.Matcher) {
         if err != nil {
           log.Println(err)
         }
-        log.Printf("Result: %v", string(result))
+        //log.Printf("Result: %v", string(result))
         consoles = result
         err = ioutil.WriteFile(stateFile, result, 0644)
       }
@@ -243,20 +266,22 @@ func reloadNginx() error {
   /* reload nginx */
 }
 
-func createNginxConf(udev string, nginx_port string, shell_port string) error {
+//func createNginxConf(udev string, nginx_port string, shell_port string, nginx_uuid string) error {
+func createNginxConf(c []Record) error {
   /* create nginx template */
-  nginx_uuid := uuid.New().String()
-  c := templatevars{
+
+  /*c := templatevars{
     NginxPort: nginx_port,
     ShellPort: shell_port,
     NginxUuid: nginx_uuid,
-  }
+  }*/
   t, err := template.ParseFiles("/app/loomis/nginx-template.conf.tpl")
   if err != nil {
     log.Print(err)
     return err
   }
-  f, err := os.Create("/app/loomis/config/"+udev+".conf")
+  //f, err := os.Create("/app/loomis/config/"+udev+".conf")
+  f, err := os.Create("/app/loomis/config/loomis.conf")
   if err != nil {
     log.Println("create file: ", err)
     return err
@@ -291,11 +316,11 @@ func checkPort(porthigh string, portlow string) (string, error) {
     port = strconv.Itoa(i)
     ln, err := net.Listen("tcp", ":" + port)
     if err != nil {
-      log.Printf("Can't listen on port %q: %s\n", port, err)
+      //log.Printf("Can't listen on port %q: %s\n", port, err)
       continue
     } else {
       _ = ln.Close()
-      log.Printf("TCP Port %q is available\n", port)
+      //log.Printf("TCP Port %q is available\n", port)
       return port, nil
     }
   }
