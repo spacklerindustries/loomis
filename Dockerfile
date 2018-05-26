@@ -7,8 +7,7 @@ RUN apt-get update && apt-get install nginx shellinabox screen -y
 RUN adduser nobody dialout
 
 EXPOSE 8080
-EXPOSE 4200-4300
-EXPOSE 8200-8300
+EXPOSE 8201-8300
 
 RUN mkdir -p /app/loomis/bin
 RUN mkdir -p /app/loomis/run
@@ -27,4 +26,4 @@ ENTRYPOINT ["/sbin/my_init"]
 CMD [ "/app/loomis/bin/entrypoint.sh" ]
 
 ## not ideal way to do it
-#docker run --rm --privileged -v /dev:/dev -v $(pwd)/vol:/app/loomis/config/:rw -p 4201-4300:4201-4300 -p 8200-8300:8200-8300 --device-cgroup-rule='c 1 rmw' --name loomis loomis
+#docker run --rm --privileged -v /dev:/dev -v $(pwd)/vol:/app/loomis/config/:rw -p 8201-8300:8201-8300 --device-cgroup-rule='c 1 rmw' --name loomis loomis
