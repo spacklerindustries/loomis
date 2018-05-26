@@ -170,7 +170,7 @@ func monitor(matcher netlink.Matcher) {
           log.Printf("%v %v", v[8], uevent.Env["DEVNAME"])
           port := checkPort("4300","4201")
           log.Println(port)
-          cmd := exec.Command("/usr/bin/shellinaboxd","-t","-s","/:ben:ben:/:screen -D -R -S "+v[8]+" /dev/"+uevent.Env["DEVNAME"]+" 9600 -o","-p",port,"--background=/tmp/"+v[8]+".pid")
+          cmd := exec.Command("/usr/bin/shellinaboxd","-t","-s","/:ben:ben:/:screen -D -R -S "+v[8]+" /dev/"+uevent.Env["DEVNAME"]+" 9600 -o","-p",port,"--background=/tmp/"+v[8]+".pid","--localhost-only")
           err2 := cmd.Start()
           cmd.Wait()
           if err2 != nil {
