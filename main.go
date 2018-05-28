@@ -17,6 +17,8 @@ import (
   "strconv"
   "html/template"
   "errors"
+  "time"
+  "bytes"
 
   "github.com/pilebones/go-udev/netlink"
   "github.com/gorilla/mux"
@@ -30,15 +32,20 @@ var (
 var consoles = []byte(`[]`)
 var stateFile = ""
 
+var greensKeeper = ""
+var greensKeeperToken = ""
+
 type Exception struct {
   Message string `json:"message"`
 }
 
 type Record struct {
-    UdevId   string `json:"udev"`
-    DeviceId string `json:"device"`
-    ShellPort string `json:"port"`
-    NginxUuid string `json:"uuid"`
+  UdevId   string `json:"udev"`
+  DeviceId string `json:"device"`
+  ShellPort string `json:"port"`
+  NginxUuid string `json:"uuid"`
+  BaudRate string `json:"baud"`
+  Status string `json:"status"`
 }
 
 type templatevars struct {
@@ -49,11 +56,30 @@ type templatevars struct {
 
 var allRecords []Record
 
+type consoleList map[string]ConsoleInfo
+
+type ConsoleInfo struct {
+  Id             string    `json:"id"`
+  UdevPath        string  `json:"console_udev"`
+  PathConsole        string  `json:"console_path"`
+  BaudConsole        string  `json:"console_baudrate"`
+  ServerConsole        string  `json:"console_server"`
+}
+
 func init() {
 	filePath = flag.String("file", "", "Optionnal input file path with matcher-rules (default: no matcher)")
 }
 
 func main() {
+  greensKeeper = os.Getenv("GK_SERVER")
+  greensKeeperToken = os.Getenv("GK_TOKEN")
+  if greensKeeper == "" {
+    log.Fatalln("GK_SERVER env var not set")
+  }
+  if greensKeeperToken == "" {
+    log.Fatalln("GK_TOKEN env var not set")
+  }
+
 	flag.Parse()
   stateFile = os.Getenv("STATE_FILE")
   if stateFile == "" {
@@ -70,6 +96,47 @@ func main() {
   }
   /* gather what we know already from the records and check they exist on the system */
   dir := "/sys/devices" //all usb devices will be in here somewhere, lets find them
+  /*
+   start checking for any devices that arent in the statefile
+   they may have been added between a service restart
+  */
+  files, err := filepath.Glob("/dev/ttyUSB*")
+  if err != nil {
+      log.Fatal(err)
+  }
+  for _, f := range files {
+    v := strings.Split(f, "/dev/")
+    fmt.Println(v[1])
+    b := recordContains(allRecords,v[1])
+    fmt.Println(b)
+    found := b
+    err2 := filepath.Walk(dir, func(path string, info os.FileInfo, err2 error) error {
+      if err2 != nil {
+        log.Printf("prevent panic by handling failure accessing a path %q: %v\n", dir, err2)
+        return err2
+      }
+      if found != true {
+        if strings.Contains(path, v[1]) {
+          splitpath := strings.Split(path, "/")
+          log.Printf("path %v", splitpath[len(splitpath)-2])
+          found = true
+          nginx_uuid := uuid.New().String()
+          newRecord := Record{UdevId: splitpath[len(splitpath)-2], DeviceId: v[1], ShellPort: "4201", NginxUuid: nginx_uuid, BaudRate: "9600", Status: "disconnected"}
+          addNewRecord(newRecord)
+          return nil
+        }
+      }
+      return nil
+    })
+    if err2 != nil {
+		  log.Printf("error walking the path %q: %v\n", dir, err2)
+	  }
+  }
+  /* end check */
+  /*
+   check statefile matches what devices we have plugged in already,
+   and start or remove as required
+  */
   for i := len(allRecords) - 1; i >= 0; i-- {
     found := false
     err2 := filepath.Walk(dir, func(path string, info os.FileInfo, err2 error) error {
@@ -93,17 +160,23 @@ func main() {
       we can check for running services using this device and kill them here too
     */
     if found == false {
+      updateGreensKeeper(allRecords[i], false)
       allRecords = append(allRecords[:i], allRecords[i+1:]...)
     } else {
-      starterr := startShellinabox(allRecords[i].UdevId, allRecords[i].DeviceId, allRecords[i].ShellPort)
-      if starterr != nil {
-        log.Println(starterr)
+      if allRecords[i].Status == "connected" {
+        starterr := startShellinabox(allRecords[i].UdevId, allRecords[i].DeviceId, allRecords[i].ShellPort, allRecords[i].BaudRate)
+        if starterr != nil {
+          log.Println(starterr)
+        }
+      } else {
+        log.Printf("Device is not connected to any slots, shellinabox not started; udev:%v,  devname: %v", allRecords[i].UdevId, allRecords[i].DeviceId)
       }
     }
     if err2 != nil {
 		  log.Printf("error walking the path %q: %v\n", dir, err2)
 	  }
   }
+  /* end check */
   result, jsonerr := json.Marshal(allRecords)
   if jsonerr != nil {
     log.Println(jsonerr)
@@ -114,12 +187,12 @@ func main() {
   if nginxconferr == nil {
     _ = reloadNginx()
   }
-
   /*
     poll greenskeeper for udev ids of plugged in caddies
     compare to what we know exists currently
     check if device matches etc, kill
   */
+
 	matcher, err := getOptionnalMatcher()
 	if err != nil {
 		log.Fatalln(err.Error())
@@ -161,49 +234,43 @@ func monitor(matcher netlink.Matcher) {
       if (uevent.Env["SUBSYSTEM"] == "tty") {
         v := strings.Split(uevent.Env["DEVPATH"], "/")
         if (uevent.Env["ACTION"] == "add") {
-          shellport, shellporterr := checkPort("4300","4201")
-          if shellporterr != nil {
-            log.Println(shellporterr)
-          }
-          //log.Println(shellport)
-          /*nginxport, nginxporterr := checkPort("8300","8201")
-          //log.Println(nginxport)
-          if nginxporterr != nil {
-            log.Println(nginxporterr)
-          }*/
           nginx_uuid := uuid.New().String()
-          // v[8] ? may not always be v[8]
-          allRecords = append(allRecords, Record{UdevId: v[len(v)-4], DeviceId: uevent.Env["DEVNAME"], ShellPort: shellport, NginxUuid: nginx_uuid})
-          log.Printf("Inserted device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
-          //if nginxporterr == nil && shellporterr == nil {
-          if shellporterr == nil {
+          consoleData, conerr := getConsoleFromGreensKeeper(v[len(v)-4])
+          if len(consoleData) == 1 && conerr == nil {
             /* no errors, do the thing */
-            starterr := startShellinabox(v[len(v)-4], uevent.Env["DEVNAME"], shellport)
-            if starterr == nil {
-              //nginxconferr := createNginxConf(v[len(v)-4], nginxport, shellport, nginx_uuid)
-              nginxconferr := createNginxConf(allRecords)
-              if nginxconferr == nil {
-                _ = reloadNginx()
+            for i := range consoleData {
+              baudRate := consoleData[i].BaudConsole
+              newRecord := Record{UdevId: v[len(v)-4], DeviceId: uevent.Env["DEVNAME"], ShellPort: "4201", NginxUuid: nginx_uuid, BaudRate: baudRate, Status: "connected"}
+              addNewRecord(newRecord)
+              log.Printf("Inserted device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
+              starterr := startShellinabox(v[len(v)-4], uevent.Env["DEVNAME"], "4201", baudRate)
+              if starterr == nil {
+                nginxconferr := createNginxConf(allRecords)
+                if nginxconferr == nil {
+                  _ = reloadNginx()
+                  updateGreensKeeper(newRecord, true)
+                }
               }
             }
+          } else {
+            /* add console in disconnected state */
+            allRecords = append(allRecords, Record{UdevId: v[len(v)-4], DeviceId: uevent.Env["DEVNAME"], ShellPort: "4201", NginxUuid: nginx_uuid, BaudRate: "9600", Status: "disconnected"})
           }
         } else {
-          var modAllRecords []Record
-          modAllRecords = allRecords
-          for i := range allRecords {
+          for i := len(allRecords) - 1; i >= 0; i-- {
             if allRecords[i].UdevId == v[len(v)-4] && allRecords[i].DeviceId == uevent.Env["DEVNAME"] {
               log.Printf("Removed device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
-              modAllRecords = remove(allRecords, Record{UdevId: v[len(v)-4], DeviceId: uevent.Env["DEVNAME"], ShellPort: allRecords[i].ShellPort, NginxUuid: allRecords[i].NginxUuid})
-            }
-          }
-          allRecords = modAllRecords
-          //log.Printf("%v %v", v[len(v)-4], uevent.Env["DEVNAME"])
-          stoperr := stopShellinabox(v[len(v)-4])
-          if stoperr == nil {
-            //removeconferr := removeNginxConfig(v[len(v)-4])
-            removeconferr := createNginxConf(allRecords)
-            if removeconferr == nil {
-              _ = reloadNginx()
+              removeRecord := allRecords[i]
+              allRecords = append(allRecords[:i], allRecords[i+1:]...)
+              stoperr := stopShellinabox(v[len(v)-4])
+              if stoperr == nil {
+                //removeconferr := removeNginxConfig(v[len(v)-4])
+                removeconferr := createNginxConf(allRecords)
+                if removeconferr == nil {
+                  _ = reloadNginx()
+                  updateGreensKeeper(removeRecord, false)
+                }
+              }
             }
           }
         }
@@ -221,9 +288,24 @@ func monitor(matcher netlink.Matcher) {
 	}
 }
 
-func startShellinabox(udev string, devname string, shellport string) error {
+func recordContains(arr []Record, str string) bool {
+   for a := range arr {
+      if arr[a].DeviceId == str {
+         return true
+      }
+   }
+   return false
+}
+
+func startShellinabox(udev string, devname string, shellport string, baudrate string) error {
   /* start shellinabox localhost */
-  shellcmd := exec.Command("/usr/bin/shellinaboxd","-t","-s","/:nobody:nogroup:/:screen -D -R -S "+udev+" /dev/"+devname+" 9600 -o","-p",shellport,"--background=/app/loomis/run/"+udev+".pid","--localhost-only")
+  newshellport, shellporterr := checkPort("4300","4201")
+  if shellporterr != nil {
+    log.Println(shellporterr)
+    return shellporterr
+  }
+  updateRecordShellPort(udev, newshellport)
+  shellcmd := exec.Command("/usr/bin/shellinaboxd","-t","-s","/:nobody:nogroup:/:screen -D -R -S "+udev+" /dev/"+devname+" "+baudrate+" -o","-p",newshellport,"--background=/app/loomis/run/"+udev+".pid","--localhost-only")
   shellerr := shellcmd.Start()
   shellcmd.Wait()
   if shellerr != nil {
@@ -253,6 +335,73 @@ func stopShellinabox(udev string) error {
   /* kill shellinabox */
 }
 
+func updateRecord(udevId string, status string, baudrate string) string {
+  for i := len(allRecords) - 1; i >= 0; i-- {
+    if allRecords[i].UdevId == udevId {
+      deviceId := allRecords[i].DeviceId
+      nginxUuid := allRecords[i].NginxUuid
+      shellport, shellporterr := checkPort("4300","4201")
+      if shellporterr != nil {
+        log.Println(shellporterr)
+        return "Error finding free port"
+      }
+      /* remove record, then add record */
+      allRecords = append(allRecords[:i], allRecords[i+1:]...)
+      stoperr := stopShellinabox(udevId)
+      if stoperr == nil {
+        //removeconferr := removeNginxConfig(v[len(v)-4])
+        removeconferr := createNginxConf(allRecords)
+        if removeconferr == nil {
+          _ = reloadNginx()
+        }
+      }
+      allRecords = append(allRecords, Record{UdevId: udevId, DeviceId: deviceId, ShellPort: shellport, NginxUuid: nginxUuid, BaudRate: baudrate, Status: status})
+      if status == "connected" {
+        starterr := startShellinabox(udevId, deviceId, shellport, baudrate)
+        if starterr != nil {
+          log.Println(starterr)
+          return "Error starting console"
+        } else {
+          nginxconferr := createNginxConf(allRecords)
+          if nginxconferr == nil {
+            _ = reloadNginx()
+          }
+          return "No matches"
+        }
+      }
+    }
+  }
+  return "No matches"
+}
+
+func addNewRecord(newRecord Record) {
+  allRecords = append(allRecords, newRecord)
+  result, jsonerr := json.Marshal(allRecords)
+  if jsonerr != nil {
+    log.Println(jsonerr)
+  }
+  err := ioutil.WriteFile(stateFile, result, 0644)
+  if err != nil {
+		log.Fatalln(err.Error())
+	}
+}
+
+func updateRecordShellPort(udevId string, shellport string) string {
+  for i := len(allRecords) - 1; i >= 0; i-- {
+    if allRecords[i].UdevId == udevId {
+      deviceId := allRecords[i].DeviceId
+      nginxuuid := allRecords[i].NginxUuid
+      baudrate := allRecords[i].BaudRate
+      status := allRecords[i].Status
+      /* remove record, then add record */
+      allRecords = append(allRecords[:i], allRecords[i+1:]...)
+      newRecord := Record{UdevId: udevId, DeviceId: deviceId, ShellPort: shellport, NginxUuid: nginxuuid, BaudRate: baudrate, Status: status}
+      addNewRecord(newRecord)
+    }
+  }
+  return "No matches"
+}
+
 func reloadNginx() error {
   /* reload nginx */
   nginxcmd := exec.Command("service","nginx","reload")
@@ -269,12 +418,6 @@ func reloadNginx() error {
 //func createNginxConf(udev string, nginx_port string, shell_port string, nginx_uuid string) error {
 func createNginxConf(c []Record) error {
   /* create nginx template */
-
-  /*c := templatevars{
-    NginxPort: nginx_port,
-    ShellPort: shell_port,
-    NginxUuid: nginx_uuid,
-  }*/
   t, err := template.ParseFiles("/app/loomis/nginx-template.conf.tpl")
   if err != nil {
     log.Print(err)
@@ -286,7 +429,11 @@ func createNginxConf(c []Record) error {
     log.Println("create file: ", err)
     return err
   }
-  err = t.Execute(f, c)
+  m := map[string]interface{}{
+    "Consoles": c,
+    "NginxPort": "8080",
+  }
+  err = t.Execute(f, m)
   if err != nil {
     log.Print("execute: ", err)
     return err
@@ -347,6 +494,74 @@ func getOptionnalMatcher() (matcher netlink.Matcher, err error) {
 
 func ListConsoles(w http.ResponseWriter, req *http.Request) {
   w.Write(consoles)
+}
+
+func PostConsole(w http.ResponseWriter, req *http.Request) {
+  w.Write(consoles)
+}
+
+func getConsoleFromGreensKeeper(UdevId string) (consoleList, error) {
+  var netClient = &http.Client{
+    Timeout: time.Second * 10,
+  }
+  token := greensKeeperToken
+  req, _ := http.NewRequest("GET", greensKeeper+"/api/v1/console/"+UdevId, nil)
+  req.Header.Add("Authorization", "Bearer "+token)
+  resp, _ := netClient.Do(req)
+  log.Printf("%v%v%v", greensKeeper,"/api/v1/console/",UdevId)
+  defer resp.Body.Close()
+  body, _ := ioutil.ReadAll(resp.Body)
+  textBytes := []byte(body)
+  log.Printf(string(textBytes))
+  list := make(consoleList)
+  if err := json.Unmarshal([]byte(textBytes), &list); err != nil {
+    log.Println(err)
+  }
+  if len(list) == 1 {
+    for i := range list {
+      slotId := list[i].UdevPath
+      if string(slotId) == "" {
+        log.Printf("No matching identifier for %v", slotId)
+        return list, errors.New("No matching identifier for")
+      } else {
+        log.Printf("Found %v",slotId)
+        return list, nil
+      }
+    }
+  } else {
+    log.Printf("No matching identifier for %v", UdevId)
+    return list, errors.New("No matching identifier for")
+  }
+  return list, errors.New("No matching identifier for")
+}
+
+func updateGreensKeeper(consoleRecord Record, server bool) {
+  consoleData, conerr := getConsoleFromGreensKeeper(consoleRecord.UdevId)
+  log.Printf(string(consoleRecord.UdevId))
+  //if nginxporterr == nil && shellporterr == nil {
+  if len(consoleData) == 1 && conerr == nil {
+    /* no errors, do the thing */
+    for i := range consoleData {
+      slotId := consoleData[i].Id
+      var netClient = &http.Client{
+        Timeout: time.Second * 10,
+      }
+      token := greensKeeperToken
+      var jsonStr = []byte("")
+      if server == true {
+        jsonStr = []byte(`{"consoleserver": "http://10.1.1.1:9090", "consolepath": "`+consoleRecord.NginxUuid+`"}`)
+      } else {
+        jsonStr = []byte(`{"consoleserver": "undefined", "consolepath": "undefined"}`)
+      }
+      req, _ := http.NewRequest("POST", greensKeeper+"/api/v1/slots/"+string(slotId), bytes.NewBuffer(jsonStr))
+      req.Header.Add("Authorization", "Bearer "+token)
+      req.Header.Set("Content-Type", "application/json")
+      resp, _ := netClient.Do(req)
+      body, _ := ioutil.ReadAll(resp.Body)
+      log.Printf(string(body))
+      defer resp.Body.Close()
+    }
+  }
 }
 
 func remove(s []Record, r Record) []Record {
