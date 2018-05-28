@@ -20,6 +20,10 @@ RUN chmod +x /app/loomis/bin/entrypoint.sh
 
 VOLUME /app/loomis/config/
 
+ENV GK_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZG1pbiI6dHJ1ZSwiZXhwIjowLCJ1c2VyaWQiOjEsInVzZXJuYW1lIjoiYWRtaW4ifQ.GQZFA7KICyo3-5xW4FOuwoNyJtjuGCQpIzzcPNgV-vM"
+ENV GK_SERVER="http://10.1.1.1:8080"
+
+
 ENTRYPOINT ["/sbin/my_init"]
 
 CMD [ "/app/loomis/bin/entrypoint.sh" ]
