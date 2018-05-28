@@ -16,6 +16,7 @@ RUN mkdir -p /app/loomis/config
 COPY main /app/loomis/bin/.
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx-template.conf.tpl /app/loomis/nginx-template.conf.tpl
+COPY htpass.tpl /app/loomis/htpass.tpl
 COPY entrypoint.sh /app/loomis/bin/.
 RUN chmod +x /app/loomis/bin/entrypoint.sh
 
