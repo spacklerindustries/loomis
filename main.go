@@ -53,7 +53,7 @@ type ConsoleRecord struct {
   NginxUuid string `json:"uuid"`
   BaudRate string `json:"baud"`
   Status string `json:"status"`
-  Permissions []*permInfo `json:"permissions,omitempty"`
+  Permissions consolePermList `json:"permissions"`
 }
 
 type permInfo struct {
@@ -77,6 +77,15 @@ type ConsoleInfo struct {
   PathConsole        string  `json:"console_path"`
   BaudConsole        string  `json:"console_baudrate"`
   ServerConsole        string  `json:"console_server"`
+}
+
+type consolePermList map[string]consolePerm
+
+type consolePerm struct {
+  Id        string `json:"slot_id"`
+  //SlotId        string `json:"slot_id"`
+  UserName      string `json:"username"`
+  PassWord      string `json:"password"`
 }
 
 func init() {
@@ -213,6 +222,7 @@ func main() {
       updateGreensKeeper(ConsoleRecords[i].UdevId, ConsoleRecords[i].NginxUuid, false)
       //allRecords = append(allRecords[:i], allRecords[i+1:]...)
       delete(ConsoleRecords, ConsoleRecords[i].UdevId)
+      deleteHtpass(ConsoleRecords[i].UdevId)
     } else {
       if ConsoleRecords[i].Status == "connected" {
         starterr := startShellinabox(ConsoleRecords[i].UdevId, ConsoleRecords[i].DeviceId, ConsoleRecords[i].ShellPort, ConsoleRecords[i].BaudRate)
@@ -291,6 +301,9 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
           if len(consoleData) == 1 && conerr == nil {
             /* no errors, do the thing */
             for i := range consoleData {
+              consoleUsers, usererror := getPermissionsFromGreensKeeper(consoleData[i].Id)
+              if usererror != nil {
+              }
               baudRate := consoleData[i].BaudConsole
               ConsoleRecords[v[len(v)-4]] = ConsoleRecord{
                 UdevId: v[len(v)-4],
@@ -299,6 +312,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
                 NginxUuid: nginx_uuid,
                 BaudRate: baudRate,
                 Status: "connected",
+                Permissions: consoleUsers,
               }
               addNewRecord(ConsoleRecords)
               log.Printf("Inserted device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
@@ -327,6 +341,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
           log.Printf("Removed device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
           removeRecord := ConsoleRecords[v[len(v)-4]]
           delete(ConsoleRecords, v[len(v)-4])
+          deleteHtpass(v[len(v)-4])
           stoperr := stopShellinabox(v[len(v)-4])
           if stoperr == nil {
             removeconferr := createNginxConf(ConsoleRecords)
@@ -397,6 +412,13 @@ func stopShellinabox(udev string) error {
   /* kill shellinabox */
 }
 
+func deleteHtpass(udevId string) {
+  delhtpass := os.Remove("/app/loomis/config/"+udevId+".htpass")
+  if delhtpass != nil {
+    log.Println(delhtpass.Error())
+  }
+}
+
 func updateRecord(udevId string, status string, baudrate string) string {
   if ConsoleRecords[udevId].UdevId == udevId {
     deviceId := ConsoleRecords[udevId].DeviceId
@@ -408,6 +430,7 @@ func updateRecord(udevId string, status string, baudrate string) string {
     }
     /* remove record, then add record */
     delete(ConsoleRecords, udevId)
+    deleteHtpass(udevId)
     stoperr := stopShellinabox(udevId)
     if stoperr == nil {
       removeconferr := createNginxConf(ConsoleRecords)
@@ -459,6 +482,13 @@ func updateRecordShellPort(udevId string, shellport string) string {
     status := ConsoleRecords[udevId].Status
     /* remove record, then add record */
     delete(ConsoleRecords, udevId)
+    consoleData, _ := getConsoleFromGreensKeeper(udevId)
+    consoleUsers := make(consolePermList)
+    if len(consoleData) == 1 {
+      for i := range consoleData {
+        consoleUsers, _ = getPermissionsFromGreensKeeper(consoleData[i].Id)
+      }
+    }
     ConsoleRecords[udevId] = ConsoleRecord{
       UdevId: udevId,
       DeviceId: deviceId,
@@ -466,6 +496,7 @@ func updateRecordShellPort(udevId string, shellport string) string {
       NginxUuid: nginxuuid,
       BaudRate: baudrate,
       Status: status,
+      Permissions: consoleUsers,
     }
     addNewRecord(ConsoleRecords)
   }
@@ -491,6 +522,28 @@ func createNginxConf(c ConsoleRecordList) error {
   if err != nil {
     log.Print(err)
     return err
+  }
+  ht, err := template.ParseFiles("/app/loomis/htpass.tpl")
+  if err != nil {
+    log.Print(err)
+    return err
+  }
+  for d := range c {
+    log.Printf("create file: /app/loomis/config/%v.htpass", c[d].UdevId)
+    fht, err := os.Create("/app/loomis/config/"+c[d].UdevId+".htpass")
+    if err != nil {
+      log.Println("create file: ", err)
+      return err
+    }
+    m := map[string]interface{}{
+      "Users": c[d].Permissions,
+    }
+    err = ht.Execute(fht, m)
+    if err != nil {
+      log.Print("execute: ", err)
+      return err
+    }
+    fht.Close()
   }
   //f, err := os.Create("/app/loomis/config/"+udev+".conf")
   f, err := os.Create("/app/loomis/config/loomis.conf")
@@ -602,6 +655,26 @@ func getConsoleFromGreensKeeper(UdevId string) (consoleList, error) {
     return list, errors.New("No matching identifier for")
   }
   return list, errors.New("No matching identifier for")
+}
+
+func getPermissionsFromGreensKeeper(slotId string) (consolePermList, error) {
+  var netClient = &http.Client{
+    Timeout: time.Second * 10,
+  }
+  token := greensKeeperToken
+  req, _ := http.NewRequest("GET", greensKeeper+"/api/v1/console/perms/"+slotId, nil)
+  req.Header.Add("Authorization", "Bearer "+token)
+  resp, _ := netClient.Do(req)
+  log.Printf("%v%v%v", greensKeeper,"/api/v1/console/perms/",slotId)
+  defer resp.Body.Close()
+  body, _ := ioutil.ReadAll(resp.Body)
+  textBytes := []byte(body)
+  log.Printf(string(textBytes))
+  list := make(consolePermList)
+  if err := json.Unmarshal([]byte(textBytes), &list); err != nil {
+    log.Println(err)
+  }
+  return list, nil
 }
 
 func updateGreensKeeper(udevid string, nginxuuid string, server bool) {
