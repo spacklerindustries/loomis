@@ -34,6 +34,11 @@ var stateFile = ""
 
 var greensKeeper = ""
 var greensKeeperToken = ""
+var loomisServer = ""
+var httpPort = ""
+var consolesPort = ""
+var dockerConsolesPort = ""
+var dockerHttpPort = ""
 
 type Exception struct {
   Message string `json:"message"`
@@ -73,11 +78,36 @@ func init() {
 func main() {
   greensKeeper = os.Getenv("GK_SERVER")
   greensKeeperToken = os.Getenv("GK_TOKEN")
+  httpPort = os.Getenv("HTTP_PORT")
+  consolesPort = os.Getenv("CONSOLES_PORT")
+  dockerHttpPort = os.Getenv("DOCKER_HTTP_PORT")
+  dockerConsolesPort = os.Getenv("DOCKER_CONSOLES_PORT")
+  loomisServer = os.Getenv("LOOMIS_SERVER")
+
   if greensKeeper == "" {
     log.Fatalln("GK_SERVER env var not set")
   }
   if greensKeeperToken == "" {
     log.Fatalln("GK_TOKEN env var not set")
+  }
+  if loomisServer == "" {
+    log.Fatalln("GK_TOKEN env var not set")
+  }
+  if httpPort == "" {
+    httpPort = "8080"
+    //log.Fatalln("HTTP_PORT env var not set")
+  }
+  if consolesPort == "" {
+    consolesPort = "8081"
+    //log.Fatalln("HTTP_PORT env var not set")
+  }
+  if dockerHttpPort == "" {
+    dockerHttpPort = httpPort
+    //log.Fatalln("HTTP_PORT env var not set")
+  }
+  if dockerConsolesPort == "" {
+    dockerConsolesPort = dockerConsolesPort
+    //log.Fatalln("HTTP_PORT env var not set")
   }
 
 	flag.Parse()
@@ -203,7 +233,8 @@ func main() {
   r := mux.NewRouter()
   r.HandleFunc("/api/v1/consoles", ListConsoles).Methods("GET")
   log.Println("Ready to serve consoles!")
-  log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", 9090), r))
+  port, _ := strconv.Atoi(httpPort)
+  log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), r))
 }
 
 func monitor(matcher netlink.Matcher) {
@@ -431,7 +462,7 @@ func createNginxConf(c []Record) error {
   }
   m := map[string]interface{}{
     "Consoles": c,
-    "NginxPort": "8080",
+    "NginxPort": consolesPort,
   }
   err = t.Execute(f, m)
   if err != nil {
@@ -549,7 +580,7 @@ func updateGreensKeeper(consoleRecord Record, server bool) {
       token := greensKeeperToken
       var jsonStr = []byte("")
       if server == true {
-        jsonStr = []byte(`{"consoleserver": "http://10.1.1.1:9090", "consolepath": "`+consoleRecord.NginxUuid+`"}`)
+        jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+consoleRecord.NginxUuid+`"}`)
       } else {
         jsonStr = []byte(`{"consoleserver": "undefined", "consolepath": "undefined"}`)
       }
