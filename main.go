@@ -630,11 +630,11 @@ func getConsoleFromGreensKeeper(UdevId string) (consoleList, error) {
   req, _ := http.NewRequest("GET", greensKeeper+"/api/v1/console/"+UdevId, nil)
   req.Header.Add("Authorization", "Bearer "+token)
   resp, _ := netClient.Do(req)
-  log.Printf("%v%v%v", greensKeeper,"/api/v1/console/",UdevId)
+  //log.Printf("%v%v%v", greensKeeper,"/api/v1/console/",UdevId)
   defer resp.Body.Close()
   body, _ := ioutil.ReadAll(resp.Body)
   textBytes := []byte(body)
-  log.Printf(string(textBytes))
+  //log.Printf(string(textBytes))
   list := make(consoleList)
   if err := json.Unmarshal([]byte(textBytes), &list); err != nil {
     log.Println(err)
@@ -665,11 +665,11 @@ func getPermissionsFromGreensKeeper(slotId string) (consolePermList, error) {
   req, _ := http.NewRequest("GET", greensKeeper+"/api/v1/console/perms/"+slotId, nil)
   req.Header.Add("Authorization", "Bearer "+token)
   resp, _ := netClient.Do(req)
-  log.Printf("%v%v%v", greensKeeper,"/api/v1/console/perms/",slotId)
+  //log.Printf("%v%v%v", greensKeeper,"/api/v1/console/perms/",slotId)
   defer resp.Body.Close()
   body, _ := ioutil.ReadAll(resp.Body)
   textBytes := []byte(body)
-  log.Printf(string(textBytes))
+  //log.Printf(string(textBytes))
   list := make(consolePermList)
   if err := json.Unmarshal([]byte(textBytes), &list); err != nil {
     log.Println(err)
@@ -679,7 +679,7 @@ func getPermissionsFromGreensKeeper(slotId string) (consolePermList, error) {
 
 func updateGreensKeeper(udevid string, nginxuuid string, server bool) {
   consoleData, conerr := getConsoleFromGreensKeeper(udevid)
-  log.Printf(string(udevid))
+  //log.Printf(string(udevid))
   //if nginxporterr == nil && shellporterr == nil {
   if len(consoleData) == 1 && conerr == nil {
     /* no errors, do the thing */
@@ -699,8 +699,8 @@ func updateGreensKeeper(udevid string, nginxuuid string, server bool) {
       req.Header.Add("Authorization", "Bearer "+token)
       req.Header.Set("Content-Type", "application/json")
       resp, _ := netClient.Do(req)
-      body, _ := ioutil.ReadAll(resp.Body)
-      log.Printf(string(body))
+      //body, _ := ioutil.ReadAll(resp.Body)
+      //log.Printf(string(body))
       defer resp.Body.Close()
     }
   }
