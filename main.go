@@ -628,7 +628,8 @@ func getConsoleFromGreensKeeper(UdevId string) (consoleList, error) {
   }
   token := greensKeeperToken
   req, _ := http.NewRequest("GET", greensKeeper+"/api/v1/console/"+UdevId, nil)
-  req.Header.Add("Authorization", "Bearer "+token)
+  //req.Header.Add("Authorization", "Bearer "+token)
+  req.Header.Add("apikey", token)
   resp, _ := netClient.Do(req)
   //log.Printf("%v%v%v", greensKeeper,"/api/v1/console/",UdevId)
   defer resp.Body.Close()
@@ -663,7 +664,8 @@ func getPermissionsFromGreensKeeper(slotId string) (consolePermList, error) {
   }
   token := greensKeeperToken
   req, _ := http.NewRequest("GET", greensKeeper+"/api/v1/console/perms/"+slotId, nil)
-  req.Header.Add("Authorization", "Bearer "+token)
+  //req.Header.Add("Authorization", "Bearer "+token)
+  req.Header.Add("apikey", token)
   resp, _ := netClient.Do(req)
   //log.Printf("%v%v%v", greensKeeper,"/api/v1/console/perms/",slotId)
   defer resp.Body.Close()
@@ -696,7 +698,8 @@ func updateGreensKeeper(udevid string, nginxuuid string, server bool) {
         jsonStr = []byte(`{"consoleserver": "undefined", "consolepath": "undefined"}`)
       }
       req, _ := http.NewRequest("POST", greensKeeper+"/api/v1/slots/"+string(slotId), bytes.NewBuffer(jsonStr))
-      req.Header.Add("Authorization", "Bearer "+token)
+      //req.Header.Add("Authorization", "Bearer "+token)
+      req.Header.Add("apikey", token)
       req.Header.Set("Content-Type", "application/json")
       resp, _ := netClient.Do(req)
       //body, _ := ioutil.ReadAll(resp.Body)
