@@ -1,3 +1,13 @@
+FROM golang
+# ARM
+#FROM arm32v7/golang as builder
+
+COPY . /go/src/loomis
+WORKDIR /go/src/loomis
+
+RUN go get -d -v ./...
+RUN go build -o main *.go
+
 FROM ubuntu
 # ARM
 #FROM arm32v7/ubuntu
@@ -12,7 +22,7 @@ RUN mkdir -p /app/loomis/bin
 RUN mkdir -p /app/loomis/run
 RUN mkdir -p /app/loomis/config
 
-COPY main /app/loomis/bin/.
+COPY --from=builder /go/src/loomis/main /app/loomis/bin/.
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx-template.conf.tpl /app/loomis/nginx-template.conf.tpl
 COPY htpass.tpl /app/loomis/htpass.tpl
