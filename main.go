@@ -416,10 +416,6 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
       // we got a login prompt!
       fmt.Printf("%v\n", login_match)
       fmt.Println(string(content))
-      /*writeerr := ioutil.WriteFile("/app/loomis/config/"+udevid+".log", content, 0644)
-      if writeerr != nil {
-        return "", nil
-      }*/
       //return "", nil
       break
     }
@@ -438,8 +434,13 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
       return "", errors.New("Nothing received from serial")
     }*/
     count++
-  }  
+  }
   fmt.Println(string(content))
+
+  /*writeerr := ioutil.WriteFile("/app/loomis/config/"+udevid+".log", content, 0644)
+  if writeerr != nil {
+    return "", nil
+  }*/
 
   serial_pattern := regexp.MustCompile("serial=(0[xX]).{8,8}")
   serial_match := strings.Split(serial_pattern.FindString(strings.TrimSpace(string(content))), "=")
