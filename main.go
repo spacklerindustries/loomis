@@ -302,42 +302,8 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
           //kill read after 30 seconds of no bytes
           serial, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second * 30)
           if sererr != nil {
-            fmt.Printf("%v\n", serial)
+            fmt.Printf("Serial No: %v\n", serial)
           }
-          /*c := &serial.Config{Name: "/dev/"+uevent.Env["DEVNAME"], Baud: 115200, ReadTimeout: time.Second * 30}
-          s, err := serial.OpenPort(c)
-          if err != nil {
-            fmt.Println(err)
-          }
-          fmt.Println("insert detected /dev/"+uevent.Env["DEVNAME"])
-          buf := make([]byte, 40)
-          var content []byte
-          count := 0
-          for {
-            n, err := s.Read(buf)
-            if err != nil {
-              //need to fix this so it stops spewing "EOF" to screen
-              //fmt.Println(err)
-            }
-            if n == 0 {
-              break
-            }
-            pattern := regexp.MustCompile("serial=(0[xX]).{8,8}")
-            match := strings.Split(pattern.FindString(strings.TrimSpace(string(content))), "=")
-            if len(match) > 1 {
-              // we got a serial number!
-            	fmt.Printf("%v\n", match[1][2:])
-              break
-            }
-            if count == 600 {
-              // exit after 600 counts and skip to shellinabox startup checks
-              // we should have found a serial by 600 counts
-              break
-            }
-            content = append(content, buf[:n]...)
-            count++
-          }
-          s.Close()*/
 
           nginx_uuid := uuid.New().String()
           consoleData, conerr := getConsoleFromGreensKeeper(v[len(v)-4])
@@ -421,6 +387,7 @@ func getSerial(device string, baud string, timeout time.Duration) (string, error
   baudrate, _ := strconv.Atoi(baud)
   c := &serial.Config{Name: "/dev/"+device, Baud: baudrate, ReadTimeout: timeout}
   s, err := serial.OpenPort(c)
+  defer s.Close()
   if err != nil {
     fmt.Println(err)
   }
@@ -436,24 +403,39 @@ func getSerial(device string, baud string, timeout time.Duration) (string, error
     }
     if n == 0 {
       //break
+      //s.Close()
+      fmt.Println(string(content))
       return "", errors.New("Nothing received from serial")
     }
     pattern := regexp.MustCompile("serial=(0[xX]).{8,8}")
+    //pattern2 := regexp.MustCompile("([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})")
     match := strings.Split(pattern.FindString(strings.TrimSpace(string(content))), "=")
+    //match2 := pattern2.FindString(strings.TrimSpace(string(content)))
     if len(match) > 1 {
       // we got a serial number!
       fmt.Printf("%v\n", match[1][2:])
+      //s.Close()
       return string(match[1][2:]), nil
     }
-    if count == 600 {
+    /*if len(match2) > 1 {
+      // we got a mac address!
+      fmt.Printf("%v\n", match2)
+      //match3 := strings.Split(match2, ":")
+      //match3[3]+match3[4]+match3[5]
+      //s.Close()
+      return string(match2), nil
+    }*/
+    /*if count == 1000 {
       // exit after 600 counts and skip to shellinabox startup checks
       // we should have found a serial by 600 counts
+      //s.Close()
       return "", errors.New("Nothing received from serial")
-    }
+    }*/
     content = append(content, buf[:n]...)
     count++
   }
-  s.Close()
+
+  //s.Close()
   return "", errors.New("Nothing received from serial")
 }
 
