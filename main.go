@@ -300,12 +300,14 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
         v := strings.Split(uevent.Env["DEVPATH"], "/")
         if (uevent.Env["ACTION"] == "add") {
           //kill read after 30 seconds of no bytes
-          serial, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second * 30)
+          nginx_uuid := uuid.New().String()
+
+          serial, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second * 30, v[len(v)-4])
           if sererr != nil {
             fmt.Printf("Serial No: %v\n", serial)
           }
 
-          nginx_uuid := uuid.New().String()
+
           consoleData, conerr := getConsoleFromGreensKeeper(v[len(v)-4])
           if len(consoleData) == 1 && conerr == nil {
             /* no errors, do the thing */
@@ -383,7 +385,7 @@ func recordContains(arr ConsoleRecordList, str string) bool {
    return false
 }
 
-func getSerial(device string, baud string, timeout time.Duration) (string, error) {
+func getSerial(device string, baud string, timeout time.Duration, udevid string) (string, error) {
   baudrate, _ := strconv.Atoi(baud)
   c := &serial.Config{Name: "/dev/"+device, Baud: baudrate, ReadTimeout: timeout}
   s, err := serial.OpenPort(c)
@@ -401,29 +403,33 @@ func getSerial(device string, baud string, timeout time.Duration) (string, error
       //need to fix this so it stops spewing "EOF" to screen
       //fmt.Println(err)
     }
+
     if n == 0 {
-      //break
+      break
       //s.Close()
+      //return "", errors.New("Nothing received from serial")
+    }
+    content = append(content, buf[:n]...)
+    login_pattern := regexp.MustCompile("login:")
+    login_match := login_pattern.FindString(strings.TrimSpace(string(content)))
+    if len(login_match) > 1 {
+      // we got a login prompt!
+      fmt.Printf("%v\n", login_match)
       fmt.Println(string(content))
-      return "", errors.New("Nothing received from serial")
+      /*writeerr := ioutil.WriteFile("/app/loomis/config/"+udevid+".log", content, 0644)
+      if writeerr != nil {
+        return "", nil
+      }*/
+      //return "", nil
+      break
     }
-    pattern := regexp.MustCompile("serial=(0[xX]).{8,8}")
-    //pattern2 := regexp.MustCompile("([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})")
-    match := strings.Split(pattern.FindString(strings.TrimSpace(string(content))), "=")
-    //match2 := pattern2.FindString(strings.TrimSpace(string(content)))
-    if len(match) > 1 {
-      // we got a serial number!
-      fmt.Printf("%v\n", match[1][2:])
-      //s.Close()
-      return string(match[1][2:]), nil
-    }
-    /*if len(match2) > 1 {
+    /*if len(mac_match) > 1 {
       // we got a mac address!
-      fmt.Printf("%v\n", match2)
+      fmt.Printf("%v\n", mac_match)
       //match3 := strings.Split(match2, ":")
       //match3[3]+match3[4]+match3[5]
       //s.Close()
-      return string(match2), nil
+      return string(mac_match), nil
     }*/
     /*if count == 1000 {
       // exit after 600 counts and skip to shellinabox startup checks
@@ -431,8 +437,19 @@ func getSerial(device string, baud string, timeout time.Duration) (string, error
       //s.Close()
       return "", errors.New("Nothing received from serial")
     }*/
-    content = append(content, buf[:n]...)
     count++
+  }  
+  fmt.Println(string(content))
+
+  serial_pattern := regexp.MustCompile("serial=(0[xX]).{8,8}")
+  serial_match := strings.Split(serial_pattern.FindString(strings.TrimSpace(string(content))), "=")
+  //mac_pattern := regexp.MustCompile("([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})")
+  //mac_match := mac_pattern.FindString(strings.TrimSpace(string(content)))
+  if len(serial_match) > 1 {
+    // we got a serial number!
+    fmt.Printf("%v\n", serial_match[1][2:])
+    //s.Close()
+    return string(serial_match[1][2:]), nil
   }
 
   //s.Close()
