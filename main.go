@@ -427,8 +427,8 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
     }
     count++
   }
-  fmt.Println(string(content))
-
+  // FIXME maybe we should dump the log somewhere
+  //fmt.Println(string(content))
   /*writeerr := ioutil.WriteFile("/app/loomis/config/"+udevid+".log", content, 0644)
   if writeerr != nil {
     return "", nil
