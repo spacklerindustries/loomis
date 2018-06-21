@@ -222,7 +222,7 @@ func main() {
       we can check for running services using this device and kill them here too
     */
     if found == false {
-      updateGreensKeeper(ConsoleRecords[i].UdevId, ConsoleRecords[i].NginxUuid, false)
+      updateGreensKeeper(ConsoleRecords[i].UdevId, ConsoleRecords[i].NginxUuid, false, "", "")
       //allRecords = append(allRecords[:i], allRecords[i+1:]...)
       delete(ConsoleRecords, ConsoleRecords[i].UdevId)
       deleteHtpass(ConsoleRecords[i].UdevId)
@@ -304,10 +304,16 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
 
           serial, macaddress, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second * 30, v[len(v)-4])
           if sererr != nil {
-            fmt.Printf("Serial No: %v\n", serial)
-            fmt.Printf("MAC Address: %v\n", macaddress)
+            if serial != "" {
+              fmt.Printf("Serial No: %v\n", serial[2:])
+              serial = strings.ToLower(serial[2:])
+            } else {
+              fmt.Printf("MAC Address: %v\n", macaddress)
+              macaddress = strings.ToLower(macaddress)
+              macsplit := strings.Split(macaddress, ":")
+              serial = macsplit[3]+macsplit[4]+macsplit[5]
+            }
           }
-
 
           consoleData, conerr := getConsoleFromGreensKeeper(v[len(v)-4])
           if len(consoleData) == 1 && conerr == nil {
@@ -333,7 +339,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
                 nginxconferr := createNginxConf(ConsoleRecords)
                 if nginxconferr == nil {
                   _ = reloadNginx()
-                  updateGreensKeeper(v[len(v)-4], nginx_uuid, true)
+                  updateGreensKeeper(v[len(v)-4], nginx_uuid, true, serial, macaddress)
                 }
               }
             }
@@ -359,7 +365,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
             removeconferr := createNginxConf(ConsoleRecords)
             if removeconferr == nil {
               _ = reloadNginx()
-              updateGreensKeeper(removeRecord.UdevId, removeRecord.NginxUuid, false)
+              updateGreensKeeper(removeRecord.UdevId, removeRecord.NginxUuid, false, "", "")
             }
           }
         }
@@ -408,7 +414,6 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
 
     if n == 0 {
       break
-      //s.Close()
       //return "", errors.New("Nothing received from serial")
     }
     content = append(content, buf[:n]...)
@@ -416,25 +421,10 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
     login_match := login_pattern.FindString(strings.TrimSpace(string(content)))
     if len(login_match) > 1 {
       // we got a login prompt!
-      fmt.Printf("%v\n", login_match)
-      fmt.Println(string(content))
-      //return "", nil
+      //fmt.Printf("%v\n", login_match)
+      //fmt.Println(string(content))
       break
     }
-    /*if len(mac_match) > 1 {
-      // we got a mac address!
-      fmt.Printf("%v\n", mac_match)
-      //match3 := strings.Split(match2, ":")
-      //match3[3]+match3[4]+match3[5]
-      //s.Close()
-      return string(mac_match), nil
-    }*/
-    /*if count == 1000 {
-      // exit after 600 counts and skip to shellinabox startup checks
-      // we should have found a serial by 600 counts
-      //s.Close()
-      return "", errors.New("Nothing received from serial")
-    }*/
     count++
   }
   fmt.Println(string(content))
@@ -772,7 +762,7 @@ func getPermissionsFromGreensKeeper(slotId string) (consolePermList, error) {
   return list, nil
 }
 
-func updateGreensKeeper(udevid string, nginxuuid string, server bool) {
+func updateGreensKeeper(udevid string, nginxuuid string, server bool, associated_pi string, macaddress string) {
   consoleData, conerr := getConsoleFromGreensKeeper(udevid)
   //log.Printf(string(udevid))
   //if nginxporterr == nil && shellporterr == nil {
@@ -786,7 +776,15 @@ func updateGreensKeeper(udevid string, nginxuuid string, server bool) {
       token := greensKeeperToken
       var jsonStr = []byte("")
       if server == true {
-        jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`"}`)
+        if associated_pi != "" && macaddress != "" {
+          jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "associated_pi": "`+associated_pi+`", "macaddress":"`+macaddress+`"}`)
+        } else if associated_pi != "" && macaddress == "" {
+          jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "associated_pi": "`+associated_pi+`"}`)
+        } else if associated_pi == "" && macaddress != "" {
+          jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "macaddress":"`+macaddress+`"}`)
+        } else {
+          jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`"}`)
+        }
       } else {
         jsonStr = []byte(`{"consoleserver": "undefined", "consolepath": "undefined"}`)
       }
