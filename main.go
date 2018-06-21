@@ -454,13 +454,13 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
     // we got a serial number!
     fmt.Printf("%v\n", serial_match[1][2:])
     //s.Close()
-    serial_number = string(serial_match[1][2:]), nil
+    serial_number = string(serial_match[1][2:])
   }
   if len(mac_match) > 1 {
     // we got a mac address!
     fmt.Printf("%v\n", mac_match)
     //s.Close()
-    mac_address = string(mac_match), nil
+    mac_address = string(mac_match)
   }
 
   //s.Close()
