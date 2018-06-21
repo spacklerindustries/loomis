@@ -302,9 +302,10 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
           //kill read after 30 seconds of no bytes
           nginx_uuid := uuid.New().String()
 
-          serial, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second * 30, v[len(v)-4])
+          serial, macaddress, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second * 30, v[len(v)-4])
           if sererr != nil {
             fmt.Printf("Serial No: %v\n", serial)
+            fmt.Printf("MAC Address: %v\n", macaddress)
           }
 
 
@@ -385,13 +386,14 @@ func recordContains(arr ConsoleRecordList, str string) bool {
    return false
 }
 
-func getSerial(device string, baud string, timeout time.Duration, udevid string) (string, error) {
+func getSerial(device string, baud string, timeout time.Duration, udevid string) (string, string, error) {
   baudrate, _ := strconv.Atoi(baud)
   c := &serial.Config{Name: "/dev/"+device, Baud: baudrate, ReadTimeout: timeout}
   s, err := serial.OpenPort(c)
   defer s.Close()
   if err != nil {
     fmt.Println(err)
+    return "", "", err
   }
   //fmt.Println("insert detected /dev/"+device)
   buf := make([]byte, 40)
@@ -444,17 +446,25 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
 
   serial_pattern := regexp.MustCompile("serial=(0[xX]).{8,8}")
   serial_match := strings.Split(serial_pattern.FindString(strings.TrimSpace(string(content))), "=")
-  //mac_pattern := regexp.MustCompile("([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})")
-  //mac_match := mac_pattern.FindString(strings.TrimSpace(string(content)))
+  mac_pattern := regexp.MustCompile("([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})")
+  mac_match := mac_pattern.FindString(strings.TrimSpace(string(content)))
+  serial_number := ""
+  mac_address := ""
   if len(serial_match) > 1 {
     // we got a serial number!
     fmt.Printf("%v\n", serial_match[1][2:])
     //s.Close()
-    return string(serial_match[1][2:]), nil
+    serial_number = string(serial_match[1][2:]), nil
+  }
+  if len(mac_match) > 1 {
+    // we got a mac address!
+    fmt.Printf("%v\n", mac_match)
+    //s.Close()
+    mac_address = string(mac_match), nil
   }
 
   //s.Close()
-  return "", errors.New("Nothing received from serial")
+  return serial_number, mac_address, errors.New("Nothing received from serial")
 }
 
 func startShellinabox(udev string, devname string, shellport string, baudrate string) error {
