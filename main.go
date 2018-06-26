@@ -441,7 +441,7 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
   serial_number := ""
   mac_address := ""
   if len(serial_match) > 1 {
-    // we got a serial number!
+    // we got a serial number! strip first 2 characters from it
     fmt.Printf("%v\n", serial_match[1][2:])
     //s.Close()
     serial_number = string(serial_match[1][2:])
