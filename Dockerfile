@@ -1,4 +1,4 @@
-FROM golang
+FROM golang as builder
 # ARM
 #FROM arm32v7/golang as builder
 

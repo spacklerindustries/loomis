@@ -310,8 +310,10 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
             } else {
               fmt.Printf("MAC Address: %v\n", macaddress)
               macaddress = strings.ToLower(macaddress)
-              macsplit := strings.Split(macaddress, ":")
-              serial = macsplit[3]+macsplit[4]+macsplit[5]
+              if macaddress != "" {
+                macsplit := strings.Split(macaddress, ":")
+                serial = macsplit[3]+macsplit[4]+macsplit[5]
+              }
             }
           }
 
