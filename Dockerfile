@@ -56,4 +56,5 @@ CMD [ "/app/loomis/bin/entrypoint.sh" ]
 
 ## not ideal way to do it
 #docker build -t spacklerind/loomis .
+#docker run -it --rm --privileged -v /dev:/dev -v $(pwd)/vol:/app/loomis/config/:rw -p 8080:8080 -p 8081:8081 --name loomis spacklerind/loomis
 #docker run -it --rm --privileged -v /dev:/dev -v $(pwd)/vol:/app/loomis/config/:rw -p 8080:8080 -p 8081:8081 --device-cgroup-rule='c 189:* rmw' --name loomis spacklerind/loomis
