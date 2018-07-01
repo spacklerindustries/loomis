@@ -46,8 +46,8 @@ ENV LOOMIS_SERVER="http://10.1.1.1"
 ## TINI
 ENV TINI_VERSION v0.18.0
 #ARM
-#ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-armhf /tini
-ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini-armhf /tini
+#ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /tini
 RUN chmod +x /tini
 ENTRYPOINT ["/tini", "--"]
 
