@@ -1,6 +1,6 @@
-FROM golang as builder
+#FROM golang as builder
 # ARM
-#FROM arm32v7/golang as builder
+FROM arm32v7/golang as builder
 
 COPY . /go/src/loomis
 WORKDIR /go/src/loomis
@@ -8,9 +8,9 @@ WORKDIR /go/src/loomis
 RUN go get -d -v ./...
 RUN go build -o main *.go
 
-FROM ubuntu
+#FROM ubuntu
 # ARM
-#FROM arm32v7/ubuntu
+FROM arm32v7/ubuntu
 
 RUN apt-get update && apt-get install nginx shellinabox screen -y
 RUN adduser nobody dialout
@@ -26,7 +26,7 @@ COPY --from=builder /go/src/loomis/main /app/loomis/bin/.
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY nginx-template.conf.tpl /app/loomis/nginx-template.conf.tpl
 COPY htpass.tpl /app/loomis/htpass.tpl
-COPY tini /app/tini
+#COPY tini /app/tini
 COPY entrypoint.sh /app/loomis/bin/.
 RUN chmod +x /app/loomis/bin/entrypoint.sh
 
