@@ -275,7 +275,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
 	log.Println("Monitoring UEvent kernel message to user-space...")
 
 	conn := new(netlink.UEventConn)
-	if err := conn.Connect(netlink.UdevEvent); err != nil {
+	if err := conn.Connect(netlink.KernelEvent); err != nil {
 		log.Fatalln("Unable to connect to Netlink Kobject UEvent socket")
 	}
 	defer conn.Close()
@@ -283,6 +283,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
 	queue := make(chan netlink.UEvent)
 	errors := make(chan error)
 	quit := conn.Monitor(queue, errors, matcher)
+
 	// Signal handler to quit properly monitor mode
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
