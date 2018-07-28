@@ -275,7 +275,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
 	log.Println("Monitoring UEvent kernel message to user-space...")
 
 	conn := new(netlink.UEventConn)
-	if err := conn.Connect(); err != nil {
+	if err := conn.Connect(netlink.UdevEvent); err != nil {
 		log.Fatalln("Unable to connect to Netlink Kobject UEvent socket")
 	}
 	defer conn.Close()
@@ -433,7 +433,7 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
   //fmt.Println(string(content))
   writeerr := ioutil.WriteFile("/app/loomis/config/"+udevid+".log", content, 0644)
   if writeerr != nil {
-    return "", nil
+    return "", "", nil
   }
 
   serial_pattern := regexp.MustCompile("serial=(0[xX]).{8,8}")
