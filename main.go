@@ -408,7 +408,7 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
     return "", "", err
   }
   //fmt.Println("insert detected /dev/"+device)
-  buf := make([]byte, 40)
+  buf := make([]byte, 256)
   var content []byte
   count := 0
   for {
