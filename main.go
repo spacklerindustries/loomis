@@ -419,8 +419,8 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
       break
       //return "", errors.New("Nothing received from serial")
     }
-    bufval := buf[:n]...
-    content = append(content, bufval)
+    bufval := buf[:n]
+    content = append(content, bufval...)
     fmt.Println(bufval)
     login_pattern := regexp.MustCompile("login:")
     login_match := login_pattern.FindString(strings.TrimSpace(string(content)))
