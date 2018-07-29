@@ -303,7 +303,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
           //kill read after 30 seconds of no bytes
           nginx_uuid := uuid.New().String()
 
-          serial, macaddress, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second * 30, v[len(v)-4])
+          serial, macaddress, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second * 45, v[len(v)-4])
           if sererr != nil {
             if serial != "" {
               fmt.Printf("Serial No: %v\n", serial[2:])
