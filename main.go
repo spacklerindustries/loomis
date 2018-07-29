@@ -397,6 +397,9 @@ func recordContains(arr ConsoleRecordList, str string) bool {
 
 func getSerial(device string, baud string, timeout time.Duration, udevid string) (string, string, error) {
   baudrate, _ := strconv.Atoi(baud)
+  log.Println(device)
+  log.Println(baud)
+  log.Println(udevid)
   c := &serial.Config{Name: "/dev/"+device, Baud: baudrate, ReadTimeout: timeout}
   s, err := serial.OpenPort(c)
   defer s.Close()
@@ -421,7 +424,7 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
     }
     bufval := buf[:n]
     content = append(content, bufval...)
-    fmt.Println(bufval)
+    log.Println(bufval)
     login_pattern := regexp.MustCompile("login:")
     login_match := login_pattern.FindString(strings.TrimSpace(string(content)))
     if len(login_match) > 1 {
