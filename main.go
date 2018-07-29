@@ -419,16 +419,17 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
     }
 
     if n == 0 {
+      log.Println("No data from serial device")
       break
       //return "", errors.New("Nothing received from serial")
     }
-    bufval := buf[:n]
-    content = append(content, bufval...)
-    log.Println(bufval)
+    content = append(content, buf[:n]...)
+    log.Println(content)
     login_pattern := regexp.MustCompile("login:")
     login_match := login_pattern.FindString(strings.TrimSpace(string(content)))
     if len(login_match) > 1 {
       // we got a login prompt!
+      log.Println("Got login prompt from serial device")
       //fmt.Printf("%v\n", login_match)
       //fmt.Println(string(content))
       break
