@@ -402,7 +402,7 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
   log.Println(udevid)
   c := &serial.Config{Name: "/dev/"+device, Baud: baudrate, ReadTimeout: timeout}
   s, err := serial.OpenPort(c)
-  defer s.Close()
+  //defer s.Close()
   if err != nil {
     fmt.Println(err)
     return "", "", err
@@ -462,7 +462,7 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
     mac_address = string(mac_match)
   }
 
-  //s.Close()
+  s.Close()
   return serial_number, mac_address, errors.New("Nothing received from serial")
 }
 
