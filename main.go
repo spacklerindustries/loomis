@@ -400,7 +400,7 @@ func getSerial(device string, baud string, timeout time.Duration, udevid string)
   log.Println(device)
   log.Println(baud)
   log.Println(udevid)
-  c := &serial.Config{Name: "/dev/"+device, Baud: baudrate, ReadTimeout: timeout}
+  c := &serial.Config{Name: "/dev/"+device, Baud: baudrate, ReadTimeout: time.Second * 60}
   s, err := serial.OpenPort(c)
   //defer s.Close()
   if err != nil {
