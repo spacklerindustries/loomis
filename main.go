@@ -35,8 +35,8 @@ var (
 var consoles = []byte(`[]`)
 var stateFile = ""
 
-var greensKeeper = ""
-var greensKeeperToken = ""
+var bushwoodServer = ""
+var bushwoodToken = ""
 var loomisServer = ""
 var httpPort = ""
 var consolesPort = ""
@@ -96,23 +96,23 @@ func init() {
 }
 
 func main() {
-  greensKeeper = os.Getenv("GK_SERVER")
-  greensKeeperToken = os.Getenv("GK_TOKEN")
+  bushwoodServer = os.Getenv("BUSHWOOD_SERVER")
+  bushwoodToken = os.Getenv("BUSHWOOD_TOKEN")
   httpPort = os.Getenv("HTTP_PORT")
   consolesPort = os.Getenv("CONSOLES_PORT")
   dockerHttpPort = os.Getenv("DOCKER_HTTP_PORT")
   dockerConsolesPort = os.Getenv("DOCKER_CONSOLES_PORT")
-  loomisServer = os.Getenv("LOOMIS_SERVER")
+  loomisServer = os.Getenv("LOOMIS_ADDRESS")
   ConsoleRecords = make(ConsoleRecordList)
 
-  if greensKeeper == "" {
-    log.Fatalln("GK_SERVER env var not set")
+  if bushwoodServer == "" {
+    log.Fatalln("BUSHWOOD_SERVER env var not set")
   }
-  if greensKeeperToken == "" {
-    log.Fatalln("GK_TOKEN env var not set")
+  if bushwoodToken == "" {
+    log.Fatalln("BUSHWOOD_TOKEN env var not set")
   }
   if loomisServer == "" {
-    log.Fatalln("GK_TOKEN env var not set")
+    log.Fatalln("LOOMIS_ADDRESS env var not set")
   }
   if httpPort == "" {
     httpPort = "8080"
@@ -222,7 +222,7 @@ func main() {
       we can check for running services using this device and kill them here too
     */
     if found == false {
-      updateGreensKeeper(ConsoleRecords[i].UdevId, ConsoleRecords[i].NginxUuid, false, "", "")
+      updateBushwood(ConsoleRecords[i].UdevId, ConsoleRecords[i].NginxUuid, false, "", "")
       //allRecords = append(allRecords[:i], allRecords[i+1:]...)
       delete(ConsoleRecords, ConsoleRecords[i].UdevId)
       deleteHtpass(ConsoleRecords[i].UdevId)
@@ -252,7 +252,7 @@ func main() {
     _ = reloadNginx()
   }
   /*
-    poll greenskeeper for udev ids of plugged in caddies
+    poll bushwood for udev ids of plugged in caddies
     compare to what we know exists currently
     check if device matches etc, kill
   */
@@ -320,11 +320,11 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
             log.Println(sererr)
           }
 
-          consoleData, conerr := getConsoleFromGreensKeeper(v[len(v)-4])
+          consoleData, conerr := getConsoleFromBushwood(v[len(v)-4])
           if len(consoleData) == 1 && conerr == nil {
             /* no errors, do the thing */
             for i := range consoleData {
-              consoleUsers, usererror := getPermissionsFromGreensKeeper(consoleData[i].Id)
+              consoleUsers, usererror := getPermissionsFromBushwood(consoleData[i].Id)
               if usererror != nil {
               }
               baudRate := consoleData[i].BaudConsole
@@ -344,7 +344,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
                 nginxconferr := createNginxConf(ConsoleRecords)
                 if nginxconferr == nil {
                   _ = reloadNginx()
-                  updateGreensKeeper(v[len(v)-4], nginx_uuid, true, serial, macaddress)
+                  updateBushwood(v[len(v)-4], nginx_uuid, true, serial, macaddress)
                 }
               }
             }
@@ -370,7 +370,7 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
             removeconferr := createNginxConf(ConsoleRecords)
             if removeconferr == nil {
               _ = reloadNginx()
-              updateGreensKeeper(removeRecord.UdevId, removeRecord.NginxUuid, false, "", "")
+              updateBushwood(removeRecord.UdevId, removeRecord.NginxUuid, false, "", "")
             }
           }
         }
@@ -592,11 +592,11 @@ func updateRecordShellPort(udevId string, shellport string) string {
     status := ConsoleRecords[udevId].Status
     /* remove record, then add record */
     delete(ConsoleRecords, udevId)
-    consoleData, _ := getConsoleFromGreensKeeper(udevId)
+    consoleData, _ := getConsoleFromBushwood(udevId)
     consoleUsers := make(consolePermList)
     if len(consoleData) == 1 {
       for i := range consoleData {
-        consoleUsers, _ = getPermissionsFromGreensKeeper(consoleData[i].Id)
+        consoleUsers, _ = getPermissionsFromBushwood(consoleData[i].Id)
       }
     }
     ConsoleRecords[udevId] = ConsoleRecord{
@@ -732,16 +732,16 @@ func PostConsole(w http.ResponseWriter, req *http.Request) {
   w.Write(consoles)
 }
 
-func getConsoleFromGreensKeeper(UdevId string) (consoleList, error) {
+func getConsoleFromBushwood(UdevId string) (consoleList, error) {
   var netClient = &http.Client{
     Timeout: time.Second * 10,
   }
-  token := greensKeeperToken
-  req, _ := http.NewRequest("GET", greensKeeper+"/api/v1/console/"+UdevId, nil)
+  token := bushwoodToken
+  req, _ := http.NewRequest("GET", bushwoodServer+"/api/v1/console/"+UdevId, nil)
   //req.Header.Add("Authorization", "Bearer "+token)
   req.Header.Add("apikey", token)
   resp, _ := netClient.Do(req)
-  //log.Printf("%v%v%v", greensKeeper,"/api/v1/console/",UdevId)
+  //log.Printf("%v%v%v", bushwoodServer,"/api/v1/console/",UdevId)
   defer resp.Body.Close()
   body, _ := ioutil.ReadAll(resp.Body)
   textBytes := []byte(body)
@@ -768,16 +768,16 @@ func getConsoleFromGreensKeeper(UdevId string) (consoleList, error) {
   return list, errors.New("No matching identifier for")
 }
 
-func getPermissionsFromGreensKeeper(slotId string) (consolePermList, error) {
+func getPermissionsFromBushwood(slotId string) (consolePermList, error) {
   var netClient = &http.Client{
     Timeout: time.Second * 10,
   }
-  token := greensKeeperToken
-  req, _ := http.NewRequest("GET", greensKeeper+"/api/v1/console/perms/"+slotId, nil)
+  token := bushwoodToken
+  req, _ := http.NewRequest("GET", bushwoodServer+"/api/v1/console/perms/"+slotId, nil)
   //req.Header.Add("Authorization", "Bearer "+token)
   req.Header.Add("apikey", token)
   resp, _ := netClient.Do(req)
-  //log.Printf("%v%v%v", greensKeeper,"/api/v1/console/perms/",slotId)
+  //log.Printf("%v%v%v", bushwoodServer,"/api/v1/console/perms/",slotId)
   defer resp.Body.Close()
   body, _ := ioutil.ReadAll(resp.Body)
   textBytes := []byte(body)
@@ -789,8 +789,8 @@ func getPermissionsFromGreensKeeper(slotId string) (consolePermList, error) {
   return list, nil
 }
 
-func updateGreensKeeper(udevid string, nginxuuid string, server bool, associated_pi string, macaddress string) {
-  consoleData, conerr := getConsoleFromGreensKeeper(udevid)
+func updateBushwood(udevid string, nginxuuid string, server bool, associated_pi string, macaddress string) {
+  consoleData, conerr := getConsoleFromBushwood(udevid)
   //log.Printf(string(udevid))
   //if nginxporterr == nil && shellporterr == nil {
   if len(consoleData) == 1 && conerr == nil {
@@ -800,22 +800,22 @@ func updateGreensKeeper(udevid string, nginxuuid string, server bool, associated
       var netClient = &http.Client{
         Timeout: time.Second * 10,
       }
-      token := greensKeeperToken
+      token := bushwoodToken
       var jsonStr = []byte("")
       if server == true {
         if associated_pi != "" && macaddress != "" {
-          jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "associated_pi": "`+associated_pi+`", "macaddress":"`+macaddress+`"}`)
+          jsonStr = []byte(`{"consoleserver": "http://`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "associated_pi": "`+associated_pi+`", "macaddress":"`+macaddress+`"}`)
         } else if associated_pi != "" && macaddress == "" {
-          jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "associated_pi": "`+associated_pi+`"}`)
+          jsonStr = []byte(`{"consoleserver": "http://`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "associated_pi": "`+associated_pi+`"}`)
         } else if associated_pi == "" && macaddress != "" {
-          jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "macaddress":"`+macaddress+`"}`)
+          jsonStr = []byte(`{"consoleserver": "http://`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "macaddress":"`+macaddress+`"}`)
         } else {
-          jsonStr = []byte(`{"consoleserver": "`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`"}`)
+          jsonStr = []byte(`{"consoleserver": "http://`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`"}`)
         }
       } else {
         jsonStr = []byte(`{"consoleserver": "undefined", "consolepath": "undefined"}`)
       }
-      req, _ := http.NewRequest("POST", greensKeeper+"/api/v1/slots/"+string(slotId), bytes.NewBuffer(jsonStr))
+      req, _ := http.NewRequest("POST", bushwoodServer+"/api/v1/slots/"+string(slotId), bytes.NewBuffer(jsonStr))
       //req.Header.Add("Authorization", "Bearer "+token)
       req.Header.Add("apikey", token)
       req.Header.Set("Content-Type", "application/json")

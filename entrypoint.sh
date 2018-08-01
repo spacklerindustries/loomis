@@ -1,4 +1,4 @@
 #!/bin/bash
 
 service nginx start
-/app/loomis/bin/main
+/app/loomis/bin/loomis
