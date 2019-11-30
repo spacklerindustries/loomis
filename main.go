@@ -1,31 +1,30 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-  "strings"
+	"html/template"
 	"io/ioutil"
 	"log"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"syscall"
-  "net/http"
-  "net"
-  "path/filepath"
-  "os/exec"
-  "strconv"
-  "html/template"
-  "errors"
-  "time"
-  "bytes"
-  "regexp"
+	"time"
 
-  "github.com/pilebones/go-udev/netlink"
-  "github.com/gorilla/mux"
-  "github.com/google/uuid"
-  "github.com/tarm/serial"
-
+	"github.com/google/uuid"
+	"github.com/gorilla/mux"
+	"github.com/pilebones/go-udev/netlink"
+	"github.com/tarm/serial"
 )
 
 var (
@@ -44,24 +43,24 @@ var dockerConsolesPort = ""
 var dockerHttpPort = ""
 
 type Exception struct {
-  Message string `json:"message"`
+	Message string `json:"message"`
 }
 
 type ConsoleRecordList map[string]ConsoleRecord
 
 type ConsoleRecord struct {
-  UdevId   string `json:"udev"`
-  DeviceId string `json:"device"`
-  ShellPort string `json:"port"`
-  NginxUuid string `json:"uuid"`
-  BaudRate string `json:"baud"`
-  Status string `json:"status"`
-  Permissions consolePermList `json:"permissions"`
+	UdevId      string          `json:"udev"`
+	DeviceId    string          `json:"device"`
+	ShellPort   string          `json:"port"`
+	NginxUuid   string          `json:"uuid"`
+	BaudRate    string          `json:"baud"`
+	Status      string          `json:"status"`
+	Permissions consolePermList `json:"permissions"`
 }
 
 type permInfo struct {
-  UserName        string `json:"username"`
-  PassWord      string `json:"password"`
+	UserName string `json:"username"`
+	PassWord string `json:"password"`
 }
 
 type templatevars struct {
@@ -75,20 +74,20 @@ var ConsoleRecords ConsoleRecordList
 type consoleList map[string]ConsoleInfo
 
 type ConsoleInfo struct {
-  Id             string    `json:"id"`
-  UdevPath        string  `json:"console_udev"`
-  PathConsole        string  `json:"console_path"`
-  BaudConsole        string  `json:"console_baudrate"`
-  ServerConsole        string  `json:"console_server"`
+	Id            string `json:"id"`
+	UdevPath      string `json:"console_udev"`
+	PathConsole   string `json:"console_path"`
+	BaudConsole   string `json:"console_baudrate"`
+	ServerConsole string `json:"console_server"`
 }
 
 type consolePermList map[string]consolePerm
 
 type consolePerm struct {
-  Id        string `json:"slot_id"`
-  //SlotId        string `json:"slot_id"`
-  UserName      string `json:"username"`
-  PassWord      string `json:"password"`
+	Id string `json:"slot_id"`
+	//SlotId        string `json:"slot_id"`
+	UserName string `json:"username"`
+	PassWord string `json:"password"`
 }
 
 func init() {
@@ -96,166 +95,166 @@ func init() {
 }
 
 func main() {
-  bushwoodServer = os.Getenv("BUSHWOOD_SERVER")
-  bushwoodToken = os.Getenv("BUSHWOOD_TOKEN")
-  httpPort = os.Getenv("HTTP_PORT")
-  consolesPort = os.Getenv("CONSOLES_PORT")
-  dockerHttpPort = os.Getenv("DOCKER_HTTP_PORT")
-  dockerConsolesPort = os.Getenv("DOCKER_CONSOLES_PORT")
-  loomisServer = os.Getenv("LOOMIS_ADDRESS")
-  ConsoleRecords = make(ConsoleRecordList)
+	bushwoodServer = os.Getenv("BUSHWOOD_SERVER")
+	bushwoodToken = os.Getenv("BUSHWOOD_TOKEN")
+	httpPort = os.Getenv("HTTP_PORT")
+	consolesPort = os.Getenv("CONSOLES_PORT")
+	dockerHttpPort = os.Getenv("DOCKER_HTTP_PORT")
+	dockerConsolesPort = os.Getenv("DOCKER_CONSOLES_PORT")
+	loomisServer = os.Getenv("LOOMIS_ADDRESS")
+	ConsoleRecords = make(ConsoleRecordList)
 
-  if bushwoodServer == "" {
-    log.Fatalln("BUSHWOOD_SERVER env var not set")
-  }
-  if bushwoodToken == "" {
-    log.Fatalln("BUSHWOOD_TOKEN env var not set")
-  }
-  if loomisServer == "" {
-    log.Fatalln("LOOMIS_ADDRESS env var not set")
-  }
-  if httpPort == "" {
-    httpPort = "8080"
-    //log.Fatalln("HTTP_PORT env var not set")
-  }
-  if consolesPort == "" {
-    consolesPort = "8081"
-    //log.Fatalln("HTTP_PORT env var not set")
-  }
-  if dockerHttpPort == "" {
-    dockerHttpPort = httpPort
-    //log.Fatalln("HTTP_PORT env var not set")
-  }
-  if dockerConsolesPort == "" {
-    dockerConsolesPort = dockerConsolesPort
-    //log.Fatalln("HTTP_PORT env var not set")
-  }
+	if bushwoodServer == "" {
+		log.Fatalln("BUSHWOOD_SERVER env var not set")
+	}
+	if bushwoodToken == "" {
+		log.Fatalln("BUSHWOOD_TOKEN env var not set")
+	}
+	if loomisServer == "" {
+		log.Fatalln("LOOMIS_ADDRESS env var not set")
+	}
+	if httpPort == "" {
+		httpPort = "8080"
+		//log.Fatalln("HTTP_PORT env var not set")
+	}
+	if consolesPort == "" {
+		consolesPort = "8081"
+		//log.Fatalln("HTTP_PORT env var not set")
+	}
+	if dockerHttpPort == "" {
+		dockerHttpPort = httpPort
+		//log.Fatalln("HTTP_PORT env var not set")
+	}
+	if dockerConsolesPort == "" {
+		dockerConsolesPort = consolesPort
+		//log.Fatalln("HTTP_PORT env var not set")
+	}
 
 	flag.Parse()
-  stateFile = os.Getenv("STATE_FILE")
-  if stateFile == "" {
-    stateFile = "/app/loomis/config/output.json"
-    //log.Fatalln("STATE_FILE env var not set")
-  }
-  result, err := ioutil.ReadFile(stateFile) // just pass the file name
-  if err != nil {
-      log.Print(err)
-  }
-  consoles = result
-  if err := json.Unmarshal([]byte(consoles), &ConsoleRecords); err != nil {
-    log.Println(err)
-  }
-  /* gather what we know already from the records and check they exist on the system */
-  dir := "/sys/devices" //all usb devices will be in here somewhere, lets find them
-  /*
-   start checking for any devices that arent in the statefile
-   they may have been added between a service restart
-  */
-  files, err := filepath.Glob("/dev/ttyUSB*")
-  if err != nil {
-      log.Fatal(err)
-  }
-  for _, f := range files {
-    v := strings.Split(f, "/dev/")
-    fmt.Println(v[1])
-    b := recordContains(ConsoleRecords,v[1])
-    fmt.Println(b)
-    found := b
-    err2 := filepath.Walk(dir, func(path string, info os.FileInfo, err2 error) error {
-      if err2 != nil {
-        log.Printf("prevent panic by handling failure accessing a path %q: %v\n", dir, err2)
-        return err2
-      }
-      if found != true {
-        if strings.Contains(path, v[1]) {
-          splitpath := strings.Split(path, "/")
-          log.Printf("path %v", splitpath[len(splitpath)-2])
-          found = true
-          nginx_uuid := uuid.New().String()
-          udevid := splitpath[len(splitpath)-2]
-          ConsoleRecords[udevid] = ConsoleRecord{
-            UdevId: udevid,
-            DeviceId: v[1],
-            ShellPort: "4201",
-            NginxUuid: nginx_uuid,
-            BaudRate: "9600",
-            Status: "disconnected",
-          }
-          addNewRecord(ConsoleRecords)
-          return nil
-        }
-      }
-      return nil
-    })
-    if err2 != nil {
-		  log.Printf("error walking the path %q: %v\n", dir, err2)
-	  }
-  }
-  var jsonBytes []byte
-  jsonBytes, err = json.Marshal(ConsoleRecords)
-  fmt.Println(string(jsonBytes))
-  /* end check */
-  /*
-   check statefile matches what devices we have plugged in already,
-   and start or remove as required
-  */
-  for i := range ConsoleRecords {
-    found := false
-    err2 := filepath.Walk(dir, func(path string, info os.FileInfo, err2 error) error {
-      if err2 != nil {
-        log.Printf("prevent panic by handling failure accessing a path %q: %v\n", dir, err2)
-        return err2
-      }
-      if found != true {
-        if strings.Contains(path, ConsoleRecords[i].UdevId) {
-          if strings.Contains(info.Name(), ConsoleRecords[i].DeviceId) {
-            log.Printf("Device exists and is active; udev:%v,  devname: %v", ConsoleRecords[i].UdevId, ConsoleRecords[i].DeviceId)
-            found = true
-            return nil
-            /* it exists */
-          }
-        }
-      }
-      return nil
-    })
-    /* if we don't find a match at all, then remove it from the records
-      we can check for running services using this device and kill them here too
-    */
-    if found == false {
-      updateBushwood(ConsoleRecords[i].UdevId, ConsoleRecords[i].NginxUuid, false, "", "")
-      //allRecords = append(allRecords[:i], allRecords[i+1:]...)
-      delete(ConsoleRecords, ConsoleRecords[i].UdevId)
-      deleteHtpass(ConsoleRecords[i].UdevId)
-    } else {
-      if ConsoleRecords[i].Status == "connected" {
-        starterr := startShellinabox(ConsoleRecords[i].UdevId, ConsoleRecords[i].DeviceId, ConsoleRecords[i].ShellPort, ConsoleRecords[i].BaudRate)
-        if starterr != nil {
-          log.Println(starterr)
-        }
-      } else {
-        log.Printf("Device is not connected to any slots, shellinabox not started; udev:%v,  devname: %v", ConsoleRecords[i].UdevId, ConsoleRecords[i].DeviceId)
-      }
-    }
-    if err2 != nil {
-		  log.Printf("error walking the path %q: %v\n", dir, err2)
-	  }
-  }
-  /* end check */
-  result, jsonerr := json.Marshal(ConsoleRecords)
-  if jsonerr != nil {
-    log.Println(jsonerr)
-  }
-  //log.Printf("Result: %v", string(result))
-  err = ioutil.WriteFile(stateFile, result, 0644)
-  nginxconferr := createNginxConf(ConsoleRecords)
-  if nginxconferr == nil {
-    _ = reloadNginx()
-  }
-  /*
-    poll bushwood for udev ids of plugged in caddies
-    compare to what we know exists currently
-    check if device matches etc, kill
-  */
+	stateFile = os.Getenv("STATE_FILE")
+	if stateFile == "" {
+		stateFile = "/app/loomis/config/output.json"
+		//log.Fatalln("STATE_FILE env var not set")
+	}
+	result, err := ioutil.ReadFile(stateFile) // just pass the file name
+	if err != nil {
+		log.Print(err)
+	}
+	consoles = result
+	if err := json.Unmarshal([]byte(consoles), &ConsoleRecords); err != nil {
+		log.Println(err)
+	}
+	/* gather what we know already from the records and check they exist on the system */
+	dir := "/sys/devices" //all usb devices will be in here somewhere, lets find them
+	/*
+	   start checking for any devices that arent in the statefile
+	   they may have been added between a service restart
+	*/
+	files, err := filepath.Glob("/dev/ttyUSB*")
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, f := range files {
+		v := strings.Split(f, "/dev/")
+		fmt.Println(v[1])
+		b := recordContains(ConsoleRecords, v[1])
+		fmt.Println(b)
+		found := b
+		err2 := filepath.Walk(dir, func(path string, info os.FileInfo, err2 error) error {
+			if err2 != nil {
+				log.Printf("prevent panic by handling failure accessing a path %q: %v\n", dir, err2)
+				return err2
+			}
+			if found != true {
+				if strings.Contains(path, v[1]) {
+					splitpath := strings.Split(path, "/")
+					log.Printf("path %v", splitpath[len(splitpath)-2])
+					found = true
+					nginx_uuid := uuid.New().String()
+					udevid := splitpath[len(splitpath)-2]
+					ConsoleRecords[udevid] = ConsoleRecord{
+						UdevId:    udevid,
+						DeviceId:  v[1],
+						ShellPort: "4201",
+						NginxUuid: nginx_uuid,
+						BaudRate:  "9600",
+						Status:    "disconnected",
+					}
+					addNewRecord(ConsoleRecords)
+					return nil
+				}
+			}
+			return nil
+		})
+		if err2 != nil {
+			log.Printf("error walking the path %q: %v\n", dir, err2)
+		}
+	}
+	var jsonBytes []byte
+	jsonBytes, err = json.Marshal(ConsoleRecords)
+	fmt.Println(string(jsonBytes))
+	/* end check */
+	/*
+	   check statefile matches what devices we have plugged in already,
+	   and start or remove as required
+	*/
+	for i := range ConsoleRecords {
+		found := false
+		err2 := filepath.Walk(dir, func(path string, info os.FileInfo, err2 error) error {
+			if err2 != nil {
+				log.Printf("prevent panic by handling failure accessing a path %q: %v\n", dir, err2)
+				return err2
+			}
+			if found != true {
+				if strings.Contains(path, ConsoleRecords[i].UdevId) {
+					if strings.Contains(info.Name(), ConsoleRecords[i].DeviceId) {
+						log.Printf("Device exists and is active; udev:%v,  devname: %v", ConsoleRecords[i].UdevId, ConsoleRecords[i].DeviceId)
+						found = true
+						return nil
+						/* it exists */
+					}
+				}
+			}
+			return nil
+		})
+		/* if we don't find a match at all, then remove it from the records
+		   we can check for running services using this device and kill them here too
+		*/
+		if found == false {
+			updateBushwood(ConsoleRecords[i].UdevId, ConsoleRecords[i].NginxUuid, false, "", "")
+			//allRecords = append(allRecords[:i], allRecords[i+1:]...)
+			delete(ConsoleRecords, ConsoleRecords[i].UdevId)
+			deleteHtpass(ConsoleRecords[i].UdevId)
+		} else {
+			if ConsoleRecords[i].Status == "connected" {
+				starterr := startShellinabox(ConsoleRecords[i].UdevId, ConsoleRecords[i].DeviceId, ConsoleRecords[i].ShellPort, ConsoleRecords[i].BaudRate)
+				if starterr != nil {
+					log.Println(starterr)
+				}
+			} else {
+				log.Printf("Device is not connected to any slots, shellinabox not started; udev:%v,  devname: %v", ConsoleRecords[i].UdevId, ConsoleRecords[i].DeviceId)
+			}
+		}
+		if err2 != nil {
+			log.Printf("error walking the path %q: %v\n", dir, err2)
+		}
+	}
+	/* end check */
+	result, jsonerr := json.Marshal(ConsoleRecords)
+	if jsonerr != nil {
+		log.Println(jsonerr)
+	}
+	//log.Printf("Result: %v", string(result))
+	err = ioutil.WriteFile(stateFile, result, 0644)
+	nginxconferr := createNginxConf(ConsoleRecords)
+	if nginxconferr == nil {
+		_ = reloadNginx()
+	}
+	/*
+	   poll bushwood for udev ids of plugged in caddies
+	   compare to what we know exists currently
+	   check if device matches etc, kill
+	*/
 
 	matcher, err := getOptionnalMatcher()
 	if err != nil {
@@ -263,12 +262,12 @@ func main() {
 	}
 	go monitor(matcher, ConsoleRecords) //run udev nonblocking?
 
-  /* api */
-  r := mux.NewRouter()
-  r.HandleFunc("/api/v1/consoles", ListConsoles).Methods("GET")
-  log.Println("Ready to serve consoles!")
-  port, _ := strconv.Atoi(httpPort)
-  log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), r))
+	/* api */
+	r := mux.NewRouter()
+	r.HandleFunc("/api/v1/consoles", ListConsoles).Methods("GET")
+	log.Println("Ready to serve consoles!")
+	port, _ := strconv.Atoi(httpPort)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), r))
 }
 
 func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
@@ -297,91 +296,91 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
 	for {
 		select {
 		case uevent := <-queue:
-      if (uevent.Env["SUBSYSTEM"] == "tty") {
-        v := strings.Split(uevent.Env["DEVPATH"], "/")
-        if (uevent.Env["ACTION"] == "add") {
-          //kill read after 30 seconds of no bytes
-          nginx_uuid := uuid.New().String()
+			if uevent.Env["SUBSYSTEM"] == "tty" {
+				v := strings.Split(uevent.Env["DEVPATH"], "/")
+				if uevent.Env["ACTION"] == "add" {
+					//kill read after 30 seconds of no bytes
+					nginx_uuid := uuid.New().String()
 
-          serial, macaddress, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second * 30, v[len(v)-4])
-          if sererr == nil {
-            if serial != "" {
-              log.Printf("Serial No: %v\n", serial[2:])
-              serial = strings.ToLower(serial[2:])
-            } else {
-              log.Printf("MAC Address: %v\n", macaddress)
-              macaddress = strings.ToLower(macaddress)
-              if macaddress != "" {
-                macsplit := strings.Split(macaddress, ":")
-                serial = macsplit[3]+macsplit[4]+macsplit[5]
-              }
-            }
-          } else {
-            log.Println(sererr)
-          }
+					serial, macaddress, sererr := getSerial(uevent.Env["DEVNAME"], "115200", time.Second*30, v[len(v)-4])
+					if sererr == nil {
+						if serial != "" {
+							log.Printf("Serial No: %v\n", serial[2:])
+							serial = strings.ToLower(serial[2:])
+						} else {
+							log.Printf("MAC Address: %v\n", macaddress)
+							macaddress = strings.ToLower(macaddress)
+							if macaddress != "" {
+								macsplit := strings.Split(macaddress, ":")
+								serial = macsplit[3] + macsplit[4] + macsplit[5]
+							}
+						}
+					} else {
+						log.Println(sererr)
+					}
 
-          consoleData, conerr := getConsoleFromBushwood(v[len(v)-4])
-          if len(consoleData) == 1 && conerr == nil {
-            /* no errors, do the thing */
-            for i := range consoleData {
-              consoleUsers, usererror := getPermissionsFromBushwood(consoleData[i].Id)
-              if usererror != nil {
-              }
-              baudRate := consoleData[i].BaudConsole
-              ConsoleRecords[v[len(v)-4]] = ConsoleRecord{
-                UdevId: v[len(v)-4],
-                DeviceId: uevent.Env["DEVNAME"],
-                ShellPort: "4201",
-                NginxUuid: nginx_uuid,
-                BaudRate: baudRate,
-                Status: "connected",
-                Permissions: consoleUsers,
-              }
-              addNewRecord(ConsoleRecords)
-              log.Printf("Inserted device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
-              starterr := startShellinabox(v[len(v)-4], uevent.Env["DEVNAME"], "4201", baudRate)
-              if starterr == nil {
-                nginxconferr := createNginxConf(ConsoleRecords)
-                if nginxconferr == nil {
-                  _ = reloadNginx()
-                  updateBushwood(v[len(v)-4], nginx_uuid, true, serial, macaddress)
-                }
-              }
-            }
-          } else {
-            /* add console in disconnected state */
-            ConsoleRecords[v[len(v)-4]] = ConsoleRecord{
-              UdevId: v[len(v)-4],
-              DeviceId: uevent.Env["DEVNAME"],
-              ShellPort: "4201",
-              NginxUuid: nginx_uuid,
-              BaudRate: "9600",
-              Status: "disconnected",
-            }
-            addNewRecord(ConsoleRecords)
-          }
-        } else {
-          log.Printf("Removed device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
-          removeRecord := ConsoleRecords[v[len(v)-4]]
-          delete(ConsoleRecords, v[len(v)-4])
-          deleteHtpass(v[len(v)-4])
-          stoperr := stopShellinabox(v[len(v)-4])
-          if stoperr == nil {
-            removeconferr := createNginxConf(ConsoleRecords)
-            if removeconferr == nil {
-              _ = reloadNginx()
-              updateBushwood(removeRecord.UdevId, removeRecord.NginxUuid, false, "", "")
-            }
-          }
-        }
-        result, err := json.Marshal(ConsoleRecords)
-        if err != nil {
-          log.Println(err)
-        }
-        //log.Printf("Result: %v", string(result))
-        consoles = result
-        err = ioutil.WriteFile(stateFile, result, 0644)
-      }
+					consoleData, conerr := getConsoleFromBushwood(v[len(v)-4])
+					if len(consoleData) == 1 && conerr == nil {
+						/* no errors, do the thing */
+						for i := range consoleData {
+							consoleUsers, usererror := getPermissionsFromBushwood(consoleData[i].Id)
+							if usererror != nil {
+							}
+							baudRate := consoleData[i].BaudConsole
+							ConsoleRecords[v[len(v)-4]] = ConsoleRecord{
+								UdevId:      v[len(v)-4],
+								DeviceId:    uevent.Env["DEVNAME"],
+								ShellPort:   "4201",
+								NginxUuid:   nginx_uuid,
+								BaudRate:    baudRate,
+								Status:      "connected",
+								Permissions: consoleUsers,
+							}
+							addNewRecord(ConsoleRecords)
+							log.Printf("Inserted device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
+							starterr := startShellinabox(v[len(v)-4], uevent.Env["DEVNAME"], "4201", baudRate)
+							if starterr == nil {
+								nginxconferr := createNginxConf(ConsoleRecords)
+								if nginxconferr == nil {
+									_ = reloadNginx()
+									updateBushwood(v[len(v)-4], nginx_uuid, true, serial, macaddress)
+								}
+							}
+						}
+					} else {
+						/* add console in disconnected state */
+						ConsoleRecords[v[len(v)-4]] = ConsoleRecord{
+							UdevId:    v[len(v)-4],
+							DeviceId:  uevent.Env["DEVNAME"],
+							ShellPort: "4201",
+							NginxUuid: nginx_uuid,
+							BaudRate:  "9600",
+							Status:    "disconnected",
+						}
+						addNewRecord(ConsoleRecords)
+					}
+				} else {
+					log.Printf("Removed device; udev: %v, devname: %v", v[len(v)-4], uevent.Env["DEVNAME"])
+					removeRecord := ConsoleRecords[v[len(v)-4]]
+					delete(ConsoleRecords, v[len(v)-4])
+					deleteHtpass(v[len(v)-4])
+					stoperr := stopShellinabox(v[len(v)-4])
+					if stoperr == nil {
+						removeconferr := createNginxConf(ConsoleRecords)
+						if removeconferr == nil {
+							_ = reloadNginx()
+							updateBushwood(removeRecord.UdevId, removeRecord.NginxUuid, false, "", "")
+						}
+					}
+				}
+				result, err := json.Marshal(ConsoleRecords)
+				if err != nil {
+					log.Println(err)
+				}
+				//log.Printf("Result: %v", string(result))
+				consoles = result
+				err = ioutil.WriteFile(stateFile, result, 0644)
+			}
 		case err := <-errors:
 			log.Printf("ERROR: %v", err)
 		}
@@ -389,321 +388,321 @@ func monitor(matcher netlink.Matcher, ConsoleRecords ConsoleRecordList) {
 }
 
 func recordContains(arr ConsoleRecordList, str string) bool {
-   for a := range arr {
-      if arr[a].DeviceId == str {
-         return true
-      }
-   }
-   return false
+	for a := range arr {
+		if arr[a].DeviceId == str {
+			return true
+		}
+	}
+	return false
 }
 
 func getSerial(device string, baud string, timeout time.Duration, udevid string) (string, string, error) {
-  baudrate, _ := strconv.Atoi(baud)
-  log.Println(device)
-  log.Println(baud)
-  log.Println(udevid)
-  c := &serial.Config{Name: "/dev/"+device, Baud: baudrate, ReadTimeout: timeout}
-  s, err := serial.OpenPort(c)
-  defer s.Close()
-  if err != nil {
-    fmt.Println(err)
-    return "", "", err
-  }
-  //fmt.Println("insert detected /dev/"+device)
+	baudrate, _ := strconv.Atoi(baud)
+	log.Println(device)
+	log.Println(baud)
+	log.Println(udevid)
+	c := &serial.Config{Name: "/dev/" + device, Baud: baudrate, ReadTimeout: timeout}
+	s, err := serial.OpenPort(c)
+	defer s.Close()
+	if err != nil {
+		fmt.Println(err)
+		return "", "", err
+	}
+	//fmt.Println("insert detected /dev/"+device)
 
-  var content []byte
-  count := 0
-  reply_err := errors.New("Nothing received from serial")
-  serial_number := ""
-  mac_address := ""
-  for {
-    buf := make([]byte, 128)
-    n, _ := s.Read(buf)
-    /*if err != nil {
-      //need to fix this so it stops spewing "EOF" to screen
-      //fmt.Println(err)
-    }*/
+	var content []byte
+	count := 0
+	reply_err := errors.New("Nothing received from serial")
+	serial_number := ""
+	mac_address := ""
+	for {
+		buf := make([]byte, 128)
+		n, _ := s.Read(buf)
+		/*if err != nil {
+		  //need to fix this so it stops spewing "EOF" to screen
+		  //fmt.Println(err)
+		}*/
 
-    if n == 0 {
-      if count == 3 {
-        log.Println("No data from serial device")
-        break
-      }
-    }
-    content = append(content, buf[:n]...)
-    //log.Println(content)
+		if n == 0 {
+			if count == 3 {
+				log.Println("No data from serial device")
+				break
+			}
+		}
+		content = append(content, buf[:n]...)
+		//log.Println(content)
 
-    serial_pattern := regexp.MustCompile("serial=(0[xX]).{8,8}")
-    serial_match := strings.Split(serial_pattern.FindString(strings.TrimSpace(string(content))), "=")
-    mac_pattern := regexp.MustCompile("([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})")
-    mac_match := mac_pattern.FindString(strings.TrimSpace(string(content)))
-    serial_number = ""
-    mac_address = ""
+		serial_pattern := regexp.MustCompile("serial=(0[xX]).{8,8}")
+		serial_match := strings.Split(serial_pattern.FindString(strings.TrimSpace(string(content))), "=")
+		mac_pattern := regexp.MustCompile("([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})")
+		mac_match := mac_pattern.FindString(strings.TrimSpace(string(content)))
+		serial_number = ""
+		mac_address = ""
 
-    if len(serial_match) > 1 {
-      // we got a serial number! strip first 2 characters from it
-      //fmt.Printf("%v\n", serial_match[1][2:])
-      //s.Close()
-      serial_number = string(serial_match[1][2:])
-      reply_err = nil
-      log.Println("Got serial number from serial device")
-      break
-    }
-    if len(mac_match) > 1 {
-      // we got a mac address!
-      //fmt.Printf("%v\n", mac_match)
-      //s.Close()
-      mac_address = string(mac_match)
-      reply_err = nil
-      log.Println("Got mac address from serial device")
-      break
-    }
+		if len(serial_match) > 1 {
+			// we got a serial number! strip first 2 characters from it
+			//fmt.Printf("%v\n", serial_match[1][2:])
+			//s.Close()
+			serial_number = string(serial_match[1][2:])
+			reply_err = nil
+			log.Println("Got serial number from serial device")
+			break
+		}
+		if len(mac_match) > 1 {
+			// we got a mac address!
+			//fmt.Printf("%v\n", mac_match)
+			//s.Close()
+			mac_address = string(mac_match)
+			reply_err = nil
+			log.Println("Got mac address from serial device")
+			break
+		}
 
-    login_pattern := regexp.MustCompile("login:")
-    login_match := login_pattern.FindString(strings.TrimSpace(string(content)))
-    if len(login_match) > 1 {
-      // we got a login prompt!
-      log.Println("Got login prompt from serial device")
-      //fmt.Printf("%v\n", login_match)
-      //fmt.Println(string(content))
-      reply_err = nil
-      break
-    }
-    count++
-  }
-  // FIXME maybe we should dump the log somewhere
-  /*log.Println("Content:-----")
-  log.Println(content)
-  log.Println("-----:Content")*/
-  writeerr := ioutil.WriteFile("/app/loomis/config/"+udevid+".log", content, 0644)
-  if writeerr != nil {
-    return "", "", nil
-  }
+		login_pattern := regexp.MustCompile("login:")
+		login_match := login_pattern.FindString(strings.TrimSpace(string(content)))
+		if len(login_match) > 1 {
+			// we got a login prompt!
+			log.Println("Got login prompt from serial device")
+			//fmt.Printf("%v\n", login_match)
+			//fmt.Println(string(content))
+			reply_err = nil
+			break
+		}
+		count++
+	}
+	// FIXME maybe we should dump the log somewhere
+	/*log.Println("Content:-----")
+	  log.Println(content)
+	  log.Println("-----:Content")*/
+	writeerr := ioutil.WriteFile("/app/loomis/config/"+udevid+".log", content, 0644)
+	if writeerr != nil {
+		return "", "", nil
+	}
 
-  //s.Close()
-  return serial_number, mac_address, reply_err
+	//s.Close()
+	return serial_number, mac_address, reply_err
 }
 
 func startShellinabox(udev string, devname string, shellport string, baudrate string) error {
-  /* start shellinabox localhost */
-  newshellport, shellporterr := checkPort("4300","4201")
-  if shellporterr != nil {
-    log.Println(shellporterr)
-    return shellporterr
-  }
-  updateRecordShellPort(udev, newshellport)
-  shellcmd := exec.Command("/usr/bin/shellinaboxd","-t","-s","/:nobody:nogroup:/:screen -D -R -S "+udev+" /dev/"+devname+" "+baudrate+" -o","-p",newshellport,"--background=/app/loomis/run/"+udev+".pid","--localhost-only")
-  shellerr := shellcmd.Start()
-  shellcmd.Wait()
-  if shellerr != nil {
-    log.Println(shellerr)
-    return shellerr
-  }
-  return nil
-  /* start shellinabox */
+	/* start shellinabox localhost */
+	newshellport, shellporterr := checkPort("4300", "4201")
+	if shellporterr != nil {
+		log.Println(shellporterr)
+		return shellporterr
+	}
+	updateRecordShellPort(udev, newshellport)
+	shellcmd := exec.Command("/usr/bin/shellinaboxd", "-t", "-s", "/:nobody:nogroup:/:screen -D -R -S "+udev+" /dev/"+devname+" "+baudrate+" -o", "-p", newshellport, "--background=/app/loomis/run/"+udev+".pid", "--localhost-only")
+	shellerr := shellcmd.Start()
+	shellcmd.Wait()
+	if shellerr != nil {
+		log.Println(shellerr)
+		return shellerr
+	}
+	return nil
+	/* start shellinabox */
 }
 
 func stopShellinabox(udev string) error {
-  /* kill shellinabox */
-  pidnum, _ := exec.Command("cat", "/app/loomis/run/"+udev+".pid").CombinedOutput()
-  pidcmd := exec.Command("kill","-9",string(pidnum))
-  piderr := pidcmd.Start()
-  pidcmd.Wait()
-  if piderr != nil {
-    log.Println(piderr)
-    return piderr
-  }
-  piderr = os.Remove("/app/loomis/run/"+udev+".pid")
-  if piderr != nil {
-    log.Println(piderr.Error())
-    return piderr
-  }
-  return nil
-  /* kill shellinabox */
+	/* kill shellinabox */
+	pidnum, _ := exec.Command("cat", "/app/loomis/run/"+udev+".pid").CombinedOutput()
+	pidcmd := exec.Command("kill", "-9", string(pidnum))
+	piderr := pidcmd.Start()
+	pidcmd.Wait()
+	if piderr != nil {
+		log.Println(piderr)
+		return piderr
+	}
+	piderr = os.Remove("/app/loomis/run/" + udev + ".pid")
+	if piderr != nil {
+		log.Println(piderr.Error())
+		return piderr
+	}
+	return nil
+	/* kill shellinabox */
 }
 
 func deleteHtpass(udevId string) {
-  delhtpass := os.Remove("/app/loomis/config/"+udevId+".htpass")
-  if delhtpass != nil {
-    log.Println(delhtpass.Error())
-  }
+	delhtpass := os.Remove("/app/loomis/config/" + udevId + ".htpass")
+	if delhtpass != nil {
+		log.Println(delhtpass.Error())
+	}
 }
 
 func updateRecord(udevId string, status string, baudrate string) string {
-  if ConsoleRecords[udevId].UdevId == udevId {
-    deviceId := ConsoleRecords[udevId].DeviceId
-    nginxUuid := ConsoleRecords[udevId].NginxUuid
-    shellport, shellporterr := checkPort("4300","4201")
-    if shellporterr != nil {
-      log.Println(shellporterr)
-      return "Error finding free port"
-    }
-    /* remove record, then add record */
-    delete(ConsoleRecords, udevId)
-    deleteHtpass(udevId)
-    stoperr := stopShellinabox(udevId)
-    if stoperr == nil {
-      removeconferr := createNginxConf(ConsoleRecords)
-      if removeconferr == nil {
-        _ = reloadNginx()
-      }
-    }
-    ConsoleRecords[udevId] = ConsoleRecord{
-      UdevId: udevId,
-      DeviceId: deviceId,
-      ShellPort: shellport,
-      NginxUuid: nginxUuid,
-      BaudRate: baudrate,
-      Status: status,
-    }
-    if status == "connected" {
-      starterr := startShellinabox(udevId, deviceId, shellport, baudrate)
-      if starterr != nil {
-        log.Println(starterr)
-        return "Error starting console"
-      } else {
-        nginxconferr := createNginxConf(ConsoleRecords)
-        if nginxconferr == nil {
-          _ = reloadNginx()
-        }
-        return "No matches"
-      }
-    }
-  }
-  return "No matches"
+	if ConsoleRecords[udevId].UdevId == udevId {
+		deviceId := ConsoleRecords[udevId].DeviceId
+		nginxUuid := ConsoleRecords[udevId].NginxUuid
+		shellport, shellporterr := checkPort("4300", "4201")
+		if shellporterr != nil {
+			log.Println(shellporterr)
+			return "Error finding free port"
+		}
+		/* remove record, then add record */
+		delete(ConsoleRecords, udevId)
+		deleteHtpass(udevId)
+		stoperr := stopShellinabox(udevId)
+		if stoperr == nil {
+			removeconferr := createNginxConf(ConsoleRecords)
+			if removeconferr == nil {
+				_ = reloadNginx()
+			}
+		}
+		ConsoleRecords[udevId] = ConsoleRecord{
+			UdevId:    udevId,
+			DeviceId:  deviceId,
+			ShellPort: shellport,
+			NginxUuid: nginxUuid,
+			BaudRate:  baudrate,
+			Status:    status,
+		}
+		if status == "connected" {
+			starterr := startShellinabox(udevId, deviceId, shellport, baudrate)
+			if starterr != nil {
+				log.Println(starterr)
+				return "Error starting console"
+			} else {
+				nginxconferr := createNginxConf(ConsoleRecords)
+				if nginxconferr == nil {
+					_ = reloadNginx()
+				}
+				return "No matches"
+			}
+		}
+	}
+	return "No matches"
 }
 
 func addNewRecord(ConsoleRecords ConsoleRecordList) {
-  result, jsonerr := json.Marshal(ConsoleRecords)
-  if jsonerr != nil {
-    log.Println(jsonerr)
-  }
-  err := ioutil.WriteFile(stateFile, result, 0644)
-  if err != nil {
+	result, jsonerr := json.Marshal(ConsoleRecords)
+	if jsonerr != nil {
+		log.Println(jsonerr)
+	}
+	err := ioutil.WriteFile(stateFile, result, 0644)
+	if err != nil {
 		log.Fatalln(err.Error())
 	}
 }
 
 func updateRecordShellPort(udevId string, shellport string) string {
-  if ConsoleRecords[udevId].UdevId == udevId {
-    deviceId := ConsoleRecords[udevId].DeviceId
-    nginxuuid := ConsoleRecords[udevId].NginxUuid
-    baudrate := ConsoleRecords[udevId].BaudRate
-    status := ConsoleRecords[udevId].Status
-    /* remove record, then add record */
-    delete(ConsoleRecords, udevId)
-    consoleData, _ := getConsoleFromBushwood(udevId)
-    consoleUsers := make(consolePermList)
-    if len(consoleData) == 1 {
-      for i := range consoleData {
-        consoleUsers, _ = getPermissionsFromBushwood(consoleData[i].Id)
-      }
-    }
-    ConsoleRecords[udevId] = ConsoleRecord{
-      UdevId: udevId,
-      DeviceId: deviceId,
-      ShellPort: shellport,
-      NginxUuid: nginxuuid,
-      BaudRate: baudrate,
-      Status: status,
-      Permissions: consoleUsers,
-    }
-    addNewRecord(ConsoleRecords)
-  }
-  return "No matches"
+	if ConsoleRecords[udevId].UdevId == udevId {
+		deviceId := ConsoleRecords[udevId].DeviceId
+		nginxuuid := ConsoleRecords[udevId].NginxUuid
+		baudrate := ConsoleRecords[udevId].BaudRate
+		status := ConsoleRecords[udevId].Status
+		/* remove record, then add record */
+		delete(ConsoleRecords, udevId)
+		consoleData, _ := getConsoleFromBushwood(udevId)
+		consoleUsers := make(consolePermList)
+		if len(consoleData) == 1 {
+			for i := range consoleData {
+				consoleUsers, _ = getPermissionsFromBushwood(consoleData[i].Id)
+			}
+		}
+		ConsoleRecords[udevId] = ConsoleRecord{
+			UdevId:      udevId,
+			DeviceId:    deviceId,
+			ShellPort:   shellport,
+			NginxUuid:   nginxuuid,
+			BaudRate:    baudrate,
+			Status:      status,
+			Permissions: consoleUsers,
+		}
+		addNewRecord(ConsoleRecords)
+	}
+	return "No matches"
 }
 
 func reloadNginx() error {
-  /* reload nginx */
-  nginxcmd := exec.Command("service","nginx","reload")
-  nginxerr := nginxcmd.Start()
-  nginxcmd.Wait()
-  if nginxerr != nil {
-    log.Println(nginxerr)
-    return nginxerr
-  }
-  return nil
-  /* reload nginx */
+	/* reload nginx */
+	nginxcmd := exec.Command("service", "nginx", "reload")
+	nginxerr := nginxcmd.Start()
+	nginxcmd.Wait()
+	if nginxerr != nil {
+		log.Println(nginxerr)
+		return nginxerr
+	}
+	return nil
+	/* reload nginx */
 }
 
 func createNginxConf(c ConsoleRecordList) error {
-  /* create nginx template */
-  t, err := template.ParseFiles("/app/loomis/nginx-template.conf.tpl")
-  if err != nil {
-    log.Print(err)
-    return err
-  }
-  ht, err := template.ParseFiles("/app/loomis/htpass.tpl")
-  if err != nil {
-    log.Print(err)
-    return err
-  }
-  for d := range c {
-    log.Printf("create file: /app/loomis/config/%v.htpass", c[d].UdevId)
-    fht, err := os.Create("/app/loomis/config/"+c[d].UdevId+".htpass")
-    if err != nil {
-      log.Println("create file: ", err)
-      return err
-    }
-    m := map[string]interface{}{
-      "Users": c[d].Permissions,
-    }
-    err = ht.Execute(fht, m)
-    if err != nil {
-      log.Print("execute: ", err)
-      return err
-    }
-    fht.Close()
-  }
-  //f, err := os.Create("/app/loomis/config/"+udev+".conf")
-  f, err := os.Create("/app/loomis/config/loomis.conf")
-  if err != nil {
-    log.Println("create file: ", err)
-    return err
-  }
-  m := map[string]interface{}{
-    "Consoles": c,
-    "NginxPort": consolesPort,
-  }
-  err = t.Execute(f, m)
-  if err != nil {
-    log.Print("execute: ", err)
-    return err
-  }
-  f.Close()
-  return nil
-  /* create nginx template */
+	/* create nginx template */
+	t, err := template.ParseFiles("/app/loomis/nginx-template.conf.tpl")
+	if err != nil {
+		log.Print(err)
+		return err
+	}
+	ht, err := template.ParseFiles("/app/loomis/htpass.tpl")
+	if err != nil {
+		log.Print(err)
+		return err
+	}
+	for d := range c {
+		log.Printf("create file: /app/loomis/config/%v.htpass", c[d].UdevId)
+		fht, err := os.Create("/app/loomis/config/" + c[d].UdevId + ".htpass")
+		if err != nil {
+			log.Println("create file: ", err)
+			return err
+		}
+		m := map[string]interface{}{
+			"Users": c[d].Permissions,
+		}
+		err = ht.Execute(fht, m)
+		if err != nil {
+			log.Print("execute: ", err)
+			return err
+		}
+		fht.Close()
+	}
+	//f, err := os.Create("/app/loomis/config/"+udev+".conf")
+	f, err := os.Create("/app/loomis/config/loomis.conf")
+	if err != nil {
+		log.Println("create file: ", err)
+		return err
+	}
+	m := map[string]interface{}{
+		"Consoles":  c,
+		"NginxPort": consolesPort,
+	}
+	err = t.Execute(f, m)
+	if err != nil {
+		log.Print("execute: ", err)
+		return err
+	}
+	f.Close()
+	return nil
+	/* create nginx template */
 }
 
 func removeNginxConfig(udev string) error {
-  /* remove nginx config */
-  conferr := os.Remove("/app/loomis/config/"+udev+".conf")
-  if conferr != nil {
-    log.Println(conferr.Error())
-    return conferr
-  }
-  return nil
-  /* remove nginx config */
+	/* remove nginx config */
+	conferr := os.Remove("/app/loomis/config/" + udev + ".conf")
+	if conferr != nil {
+		log.Println(conferr.Error())
+		return conferr
+	}
+	return nil
+	/* remove nginx config */
 }
 
 func checkPort(porthigh string, portlow string) (string, error) {
-  /* check port in range is unused */
-  porta, _ := strconv.Atoi(portlow)
-  portb, _ := strconv.Atoi(porthigh)
-  port := ""
-  for i := porta; i <= portb; i++ {
-    port = strconv.Itoa(i)
-    ln, err := net.Listen("tcp", ":" + port)
-    if err != nil {
-      //log.Printf("Can't listen on port %q: %s\n", port, err)
-      continue
-    } else {
-      _ = ln.Close()
-      //log.Printf("TCP Port %q is available\n", port)
-      return port, nil
-    }
-  }
-  return "", errors.New("Unable to allocate port")
+	/* check port in range is unused */
+	porta, _ := strconv.Atoi(portlow)
+	portb, _ := strconv.Atoi(porthigh)
+	port := ""
+	for i := porta; i <= portb; i++ {
+		port = strconv.Itoa(i)
+		ln, err := net.Listen("tcp", ":"+port)
+		if err != nil {
+			//log.Printf("Can't listen on port %q: %s\n", port, err)
+			continue
+		} else {
+			_ = ln.Close()
+			//log.Printf("TCP Port %q is available\n", port)
+			return port, nil
+		}
+	}
+	return "", errors.New("Unable to allocate port")
 }
 
 func getOptionnalMatcher() (matcher netlink.Matcher, err error) {
@@ -725,104 +724,116 @@ func getOptionnalMatcher() (matcher netlink.Matcher, err error) {
 }
 
 func ListConsoles(w http.ResponseWriter, req *http.Request) {
-  w.Write(consoles)
+	w.Write(consoles)
 }
 
 func PostConsole(w http.ResponseWriter, req *http.Request) {
-  w.Write(consoles)
+	w.Write(consoles)
 }
 
 func getConsoleFromBushwood(UdevId string) (consoleList, error) {
-  var netClient = &http.Client{
-    Timeout: time.Second * 10,
-  }
-  token := bushwoodToken
-  req, _ := http.NewRequest("GET", bushwoodServer+"/api/v1/console/"+UdevId, nil)
-  //req.Header.Add("Authorization", "Bearer "+token)
-  req.Header.Add("apikey", token)
-  resp, _ := netClient.Do(req)
-  //log.Printf("%v%v%v", bushwoodServer,"/api/v1/console/",UdevId)
-  defer resp.Body.Close()
-  body, _ := ioutil.ReadAll(resp.Body)
-  textBytes := []byte(body)
-  //log.Printf(string(textBytes))
-  list := make(consoleList)
-  if err := json.Unmarshal([]byte(textBytes), &list); err != nil {
-    log.Println(err)
-  }
-  if len(list) == 1 {
-    for i := range list {
-      slotId := list[i].UdevPath
-      if string(slotId) == "" {
-        log.Printf("No matching identifier for %v", slotId)
-        return list, errors.New("No matching identifier for")
-      } else {
-        log.Printf("Found %v",slotId)
-        return list, nil
-      }
-    }
-  } else {
-    log.Printf("No matching identifier for %v", UdevId)
-    return list, errors.New("No matching identifier for")
-  }
-  return list, errors.New("No matching identifier for")
+	list := make(consoleList)
+	var netClient = &http.Client{
+		Timeout: time.Second * 10,
+	}
+	token := bushwoodToken
+	req, _ := http.NewRequest("GET", bushwoodServer+"/api/v1/console/"+UdevId, nil)
+	//req.Header.Add("Authorization", "Bearer "+token)
+	req.Header.Add("apikey", token)
+	resp, _ := netClient.Do(req)
+	//log.Printf("%v%v%v", bushwoodServer,"/api/v1/console/",UdevId)
+	resp, err := netClient.Do(req)
+	if err != nil {
+		log.Println(err)
+		return list, nil
+	}
+	body, _ := ioutil.ReadAll(resp.Body)
+	textBytes := []byte(body)
+	//log.Printf(string(textBytes))
+	if err := json.Unmarshal([]byte(textBytes), &list); err != nil {
+		log.Println(err)
+	}
+	if len(list) == 1 {
+		for i := range list {
+			slotId := list[i].UdevPath
+			if string(slotId) == "" {
+				log.Printf("No matching identifier for %v", slotId)
+				return list, errors.New("No matching identifier for")
+			} else {
+				log.Printf("Found %v", slotId)
+				return list, nil
+			}
+		}
+	} else {
+		log.Printf("No matching identifier for %v", UdevId)
+		return list, errors.New("No matching identifier for")
+	}
+	return list, errors.New("No matching identifier for")
 }
 
 func getPermissionsFromBushwood(slotId string) (consolePermList, error) {
-  var netClient = &http.Client{
-    Timeout: time.Second * 10,
-  }
-  token := bushwoodToken
-  req, _ := http.NewRequest("GET", bushwoodServer+"/api/v1/console/perms/"+slotId, nil)
-  //req.Header.Add("Authorization", "Bearer "+token)
-  req.Header.Add("apikey", token)
-  resp, _ := netClient.Do(req)
-  //log.Printf("%v%v%v", bushwoodServer,"/api/v1/console/perms/",slotId)
-  defer resp.Body.Close()
-  body, _ := ioutil.ReadAll(resp.Body)
-  textBytes := []byte(body)
-  //log.Printf(string(textBytes))
-  list := make(consolePermList)
-  if err := json.Unmarshal([]byte(textBytes), &list); err != nil {
-    log.Println(err)
-  }
-  return list, nil
+	list := make(consolePermList)
+	var netClient = &http.Client{
+		Timeout: time.Second * 10,
+	}
+	token := bushwoodToken
+	req, _ := http.NewRequest("GET", bushwoodServer+"/api/v1/console/perms/"+slotId, nil)
+	//req.Header.Add("Authorization", "Bearer "+token)
+	req.Header.Add("apikey", token)
+	resp, err := netClient.Do(req)
+	if err != nil {
+		log.Println(err)
+		return list, nil
+	}
+	//log.Printf("%v%v%v", bushwoodServer,"/api/v1/console/perms/",slotId)
+	defer resp.Body.Close()
+	body, _ := ioutil.ReadAll(resp.Body)
+	textBytes := []byte(body)
+	//log.Printf(string(textBytes))
+	if err := json.Unmarshal([]byte(textBytes), &list); err != nil {
+		log.Println(err)
+	}
+	return list, nil
 }
 
 func updateBushwood(udevid string, nginxuuid string, server bool, associated_pi string, macaddress string) {
-  consoleData, conerr := getConsoleFromBushwood(udevid)
-  //log.Printf(string(udevid))
-  //if nginxporterr == nil && shellporterr == nil {
-  if len(consoleData) == 1 && conerr == nil {
-    /* no errors, do the thing */
-    for i := range consoleData {
-      slotId := consoleData[i].Id
-      var netClient = &http.Client{
-        Timeout: time.Second * 10,
-      }
-      token := bushwoodToken
-      var jsonStr = []byte("")
-      if server == true {
-        if associated_pi != "" && macaddress != "" {
-          jsonStr = []byte(`{"consoleserver": "http://`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "associated_pi": "`+associated_pi+`", "macaddress":"`+macaddress+`"}`)
-        } else if associated_pi != "" && macaddress == "" {
-          jsonStr = []byte(`{"consoleserver": "http://`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "associated_pi": "`+associated_pi+`"}`)
-        } else if associated_pi == "" && macaddress != "" {
-          jsonStr = []byte(`{"consoleserver": "http://`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`", "macaddress":"`+macaddress+`"}`)
-        } else {
-          jsonStr = []byte(`{"consoleserver": "http://`+loomisServer+`:`+dockerConsolesPort+`", "consolepath": "`+nginxuuid+`"}`)
-        }
-      } else {
-        jsonStr = []byte(`{"consoleserver": "undefined", "consolepath": "undefined"}`)
-      }
-      req, _ := http.NewRequest("POST", bushwoodServer+"/api/v1/slots/"+string(slotId), bytes.NewBuffer(jsonStr))
-      //req.Header.Add("Authorization", "Bearer "+token)
-      req.Header.Add("apikey", token)
-      req.Header.Set("Content-Type", "application/json")
-      resp, _ := netClient.Do(req)
-      //body, _ := ioutil.ReadAll(resp.Body)
-      //log.Printf(string(body))
-      defer resp.Body.Close()
-    }
-  }
+	consoleData, conerr := getConsoleFromBushwood(udevid)
+	//log.Printf(string(udevid))
+	//if nginxporterr == nil && shellporterr == nil {
+	if len(consoleData) == 1 && conerr == nil {
+		/* no errors, do the thing */
+		for i := range consoleData {
+			slotId := consoleData[i].Id
+			var netClient = &http.Client{
+				Timeout: time.Second * 10,
+			}
+			token := bushwoodToken
+			var jsonStr = []byte("")
+			if server == true {
+				if associated_pi != "" && macaddress != "" {
+					jsonStr = []byte(`{"consoleserver": "http://` + loomisServer + `:` + dockerConsolesPort + `", "consolepath": "` + nginxuuid + `", "associated_pi": "` + associated_pi + `", "macaddress":"` + macaddress + `"}`)
+				} else if associated_pi != "" && macaddress == "" {
+					jsonStr = []byte(`{"consoleserver": "http://` + loomisServer + `:` + dockerConsolesPort + `", "consolepath": "` + nginxuuid + `", "associated_pi": "` + associated_pi + `"}`)
+				} else if associated_pi == "" && macaddress != "" {
+					jsonStr = []byte(`{"consoleserver": "http://` + loomisServer + `:` + dockerConsolesPort + `", "consolepath": "` + nginxuuid + `", "macaddress":"` + macaddress + `"}`)
+				} else {
+					jsonStr = []byte(`{"consoleserver": "http://` + loomisServer + `:` + dockerConsolesPort + `", "consolepath": "` + nginxuuid + `"}`)
+				}
+			} else {
+				jsonStr = []byte(`{"consoleserver": "undefined", "consolepath": "undefined"}`)
+			}
+			req, _ := http.NewRequest("POST", bushwoodServer+"/api/v1/slots/"+string(slotId), bytes.NewBuffer(jsonStr))
+			//req.Header.Add("Authorization", "Bearer "+token)
+			req.Header.Add("apikey", token)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := netClient.Do(req)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			//body, _ := ioutil.ReadAll(resp.Body)
+			//log.Printf(string(body))
+			defer resp.Body.Close()
+		}
+	}
 }
